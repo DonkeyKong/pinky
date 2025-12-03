@@ -232,14 +232,6 @@ protected:
             {ColorName::Red, 4, {240, 96, 87}},
             {ColorName::Yellow, 5, {255, 255, 152}},
             {ColorName::Orange, 6, {255, 157, 125}}
-
-            // {ColorName::Black, 0, {48, 45, 72}},
-            // {ColorName::White, 1, {204, 194, 184}},
-            // {ColorName::Green, 2, {71, 98, 73}},
-            // {ColorName::Blue, 3, {81, 71, 107}},
-            // {ColorName::Red, 4, {167, 73, 69}},
-            // {ColorName::Yellow, 5, {214, 180, 90}},
-            // {ColorName::Orange, 6, {200, 121, 91}}
           };
         break;
     }

@@ -55,7 +55,8 @@ int main()
   auto inky = Inky::Create();
 
   CommandParser parser;
-  float ditherAccuracy = 0.95f;
+  float testSaturation = 0.9f;
+  float testValue = 0.9f;
 
   parser.addCommand("eeprom", "", "Print out eeprom data read from the display",[&]()
   {
@@ -70,6 +71,8 @@ int main()
 
   parser.addProperty("dither", inky->bufferRGB().ditherEnabled, false, "Dither Enabled: 0 or 1, default 1");
   parser.addProperty("da", inky->bufferRGB().ditherAccuracy, false, "Dither Accuracy: 0.5 - 1.0, default 0.95");
+  parser.addProperty("t1_s", testSaturation, false, "Test Pattern 1, Saturation");
+  parser.addProperty("t1_v", testValue, false, "Test Pattern 1, Value");
 
   parser.addCommand("props", [&](){ parser.printPropertyValues(); });
   parser.addCommand("test", "pattern", "Show a color test pattern",[&](int pattern)
@@ -103,14 +106,14 @@ int main()
         for (int x=0; x < buffer.width; ++x)
         {
           float dist = sqrt(powf(x-centerX, 2.0f) + powf(y-centerY, 2.0f));
-          float hue = remap(dist, 0.0f, radius, 0.0f, 360.0f);
+          float hue = remap(dist, 40.0f, radius, 0.0f, 360.0f);
           if ((int)dist % 20 < 3)
           {
             buffer.setPixel(x,y,{0,0,0});
           }
           else
           {
-            buffer.setPixel(x,y, HSVColor{hue, 1.0f, 1.0f}.toRGB());
+            buffer.setPixel(x,y, HSVColor{hue, testSaturation, testValue}.toRGB());
           }
         }
       }
