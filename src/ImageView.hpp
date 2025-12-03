@@ -237,20 +237,25 @@ public:
       }
 
       // Convert the current color to LAB and add the current error
-      LabColor current = color.toLab() + thisRowError_[x];
+      Vec3i currentDesired = Vec3i{color.R, color.G, color.B} + thisRowError_[x];
 
-      // Convert to nearest indexed color, saving error
-      LabColor error;
-      IndexedColor nearestIndexed = indexed_->colorMap().toIndexedColor(current, error);
+      // Convert to nearest indexed color
+      IndexedColor nearestIndexed = indexed_->colorMap().toIndexedColor(RGBColor{
+        (uint8_t)std::clamp(currentDesired.X, 0, 255),
+        (uint8_t)std::clamp(currentDesired.Y, 0, 255),
+        (uint8_t)std::clamp(currentDesired.Z, 0, 255)
+      });
       indexed_->setPixel(x,y,nearestIndexed);
 
-      // Attenuate the error
+      // Calculate error
+      RGBColor realizedColor = indexed_->colorMap().toRGBColor(nearestIndexed);
+      Vec3i error = currentDesired - Vec3i{realizedColor.R, realizedColor.G, realizedColor.B};
       error = error * ditherAccuracy;
 
       // Diffuse the error into the error buffers
       if (x < width-1)
       {
-        thisRowError_[x+1] += error *   (7.0f / 16.0f);
+        thisRowError_[x+1] += error * (7.0f / 16.0f);
         nextRowError_[x+1] += error * (1.0f / 16.0f);
       }
       if (x > 0)
@@ -280,8 +285,8 @@ public:
 private:
   std::shared_ptr<IndexedImageView> indexed_;
   int currentDiffusionRow_;
-  std::vector<LabColor> thisRowError_;
-  std::vector<LabColor> nextRowError_;
+  std::vector<Vec3i> thisRowError_;
+  std::vector<Vec3i> nextRowError_;
 };
 
 // Used by Black/White/Red and Black/White/Yellow Inky displays
