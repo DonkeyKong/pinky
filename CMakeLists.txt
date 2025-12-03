@@ -59,7 +59,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 # endforeach()
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC "LOGGING_ENABLED")
-#target_compile_definitions(${PROJECT_NAME} PUBLIC "DEBUG_SPI")
+target_compile_definitions(${PROJECT_NAME} PUBLIC "DEBUG_SPI")
 #target_compile_definitions(${PROJECT_NAME} PUBLIC "ENABLE_PICO_MULTICORE")
 
 target_link_libraries(${PROJECT_NAME}

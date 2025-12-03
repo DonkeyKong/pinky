@@ -91,8 +91,6 @@ public:
   virtual void setBorder(IndexedColor color) = 0;
   // Get the display eeprom info fetched from I2C before connection
   virtual const InkyEeprom& eeprom() const = 0;
-  // Generate a color test pattern and put it in the buffer
-  virtual void colorTest() = 0;
   // Set the the buffer to all "clean" pixels
   virtual void clear() = 0;
   // Push the buffer contents to the display
@@ -227,13 +225,21 @@ protected:
       case ColorCapability::SevenColorv2:
         displayColors = 
           {
-            {ColorName::Black, 0, {48, 45, 72}},
-            {ColorName::White, 1, {204, 194, 184}},
-            {ColorName::Green, 2, {71, 98, 73}},
-            {ColorName::Blue, 3, {81, 71, 107}},
-            {ColorName::Red, 4, {167, 73, 69}},
-            {ColorName::Yellow, 5, {214, 180, 90}},
-            {ColorName::Orange, 6, {200, 121, 91}}
+            {ColorName::Black, 0, {0, 0, 0}},
+            {ColorName::White, 1, {255, 255, 255}},
+            {ColorName::Green, 2, {81, 128, 44}},
+            {ColorName::Blue, 3, {90, 78, 144}},
+            {ColorName::Red, 4, {240, 96, 87}},
+            {ColorName::Yellow, 5, {255, 255, 152}},
+            {ColorName::Orange, 6, {255, 157, 125}}
+
+            // {ColorName::Black, 0, {48, 45, 72}},
+            // {ColorName::White, 1, {204, 194, 184}},
+            // {ColorName::Green, 2, {71, 98, 73}},
+            // {ColorName::Blue, 3, {81, 71, 107}},
+            // {ColorName::Red, 4, {167, 73, 69}},
+            // {ColorName::Yellow, 5, {214, 180, 90}},
+            // {ColorName::Orange, 6, {200, 121, 91}}
           };
         break;
     }
@@ -311,21 +317,6 @@ protected:
     std::cout << std::endl;
     #endif
   }
-  
-  // Generate a color test directly into the display buffer
-  void colorTest()
-  {
-    const auto& indexedColors = colorMap_->indexedColors();
-    auto& bufIndexed = bufferIndexed();
-    int colsPerColor = bufIndexed.width / indexedColors.size();
-    for (int y = 0; y < bufIndexed.height; ++y)
-    {
-      for (int x = 0; x < bufIndexed.width; ++x)
-      {
-        bufIndexed.setPixel(x, y, indexedColors[std::clamp(x / colsPerColor, 0, (int)(indexedColors.size()-1))]);
-      }
-    }
-  }
 };
 
 class InkySSD1683 final : public InkyBase
@@ -394,7 +385,7 @@ public:
       color, 
       color
     );
-    bufRgb_ = std::make_shared<RGBToIndexedImageView>(bufIndexed_, false); // Diffusion not yet supported
+    bufRgb_ = std::make_shared<RGBToIndexedImageView>(bufIndexed_);
   }
 
   virtual IndexedImageView& bufferIndexed() override
@@ -531,7 +522,7 @@ public:
     eeprom_.height = correctionData.rows;
 
     buf_ = std::make_shared<Packed4BitIndexedImage>(eeprom_.width, eeprom_.height, colorMap_);
-    bufRgb_ = std::make_shared<RGBToIndexedImageView>(buf_, false); // Diffusion not supported
+    bufRgb_ = std::make_shared<RGBToIndexedImageView>(buf_);
 
     // Setup the GPIO pins
     dc_.set(false);

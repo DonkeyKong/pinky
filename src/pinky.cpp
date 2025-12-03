@@ -55,6 +55,7 @@ int main()
   auto inky = Inky::Create();
 
   CommandParser parser;
+  float ditherAccuracy = 0.95f;
 
   parser.addCommand("eeprom", "", "Print out eeprom data read from the display",[&]()
   {
@@ -67,24 +68,42 @@ int main()
       std::cout << "    Write Time: " << inky->eeprom().writeTime << std::endl;
   });
 
+  parser.addProperty("dither", inky->bufferRGB().ditherEnabled, false, "Dither Enabled: 0 or 1, default 1");
+  parser.addProperty("da", inky->bufferRGB().ditherAccuracy, false, "Dither Accuracy: 0.5 - 1.0, default 0.95");
+
+  parser.addCommand("props", [&](){ parser.printPropertyValues(); });
   parser.addCommand("test", "pattern", "Show a color test pattern",[&](int pattern)
   {
     if (pattern == 0)
     {
-      inky->colorTest();
+      // Color bar pattern, written directly in indexed colors
+      const auto& indexedColors = inky->getColorMap()->indexedColors();
+      auto& bufIndexed = inky->bufferIndexed();
+      int colsPerColor = bufIndexed.width / indexedColors.size();
+      for (int y = 0; y < bufIndexed.height; ++y)
+      {
+        for (int x = 0; x < bufIndexed.width; ++x)
+        {
+          bufIndexed.setPixel(x, y, indexedColors[std::clamp(x / colsPerColor, 0, (int)(indexedColors.size()-1))]);
+        }
+      }
     }
     else if (pattern == 1)
     {
+      // RGB bullseye, written in RGB space
       auto& buffer = inky->bufferRGB();
+
       int centerX = buffer.width / 2;
       int centerY = buffer.height / 2;
+      float radius = (float)buffer.width / 2.0f * 1.2f;
+
       for (int y=0; y < buffer.height; ++y)
       {
         DEBUG_LOG_IF((y % 10 == 0), "Generation: " << (int)((float)y / (float) buffer.height * 100.0f) << "%");
         for (int x=0; x < buffer.width; ++x)
         {
           float dist = sqrt(powf(x-centerX, 2.0f) + powf(y-centerY, 2.0f));
-          float hue = remap(dist, 0.0f, 240.0f, 0.0f, 360.0f);
+          float hue = remap(dist, 0.0f, radius, 0.0f, 360.0f);
           if ((int)dist % 20 < 3)
           {
             buffer.setPixel(x,y,{0,0,0});
