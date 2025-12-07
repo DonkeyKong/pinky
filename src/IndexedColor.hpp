@@ -160,24 +160,24 @@ const std::vector<ColorName>& IndexedColorMap::namedColors() const
   return namedColors_;
 }
 
-IndexedColor IndexedColorMap::toIndexedColor(const LabColor& color, LabColor& error) const
+IndexedColor IndexedColorMap::toIndexedColor(const LabColor& inputColor, LabColor& error) const
 {
   // Find the indexed color with the minimum deltaE from the specified color
-  Vec3i coli {(int)color.L, (int)color.a, (int)color.b};
+  Vec3i inputColorInt {(int)inputColor.L, (int)inputColor.a, (int)inputColor.b};
   int minDeltaE = std::numeric_limits<int>::max();
   IndexedColor minIndexColor = 0;
 
-  for (auto& color : fastDeltaELookup)
+  for (auto& paletteColor : fastDeltaELookup)
   {
-    Vec3i d = coli-color.labInt;
+    Vec3i d = inputColorInt-paletteColor.labInt;
     int dE = d.X*d.X+d.Y*d.Y+d.Z*d.Z;
     if (dE < minDeltaE)
     {
       minDeltaE = dE;
-      minIndexColor = color.index;
+      minIndexColor = paletteColor.index;
     }
   }
-  error = color - indexToLab.at(minIndexColor);
+  error = inputColor - indexToLab.at(minIndexColor);
   return minIndexColor;
 }
 
