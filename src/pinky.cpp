@@ -109,6 +109,8 @@ int main()
       return;
     }
 
+    auto startTime = to_ms_since_boot(get_absolute_time());
+
     auto& buffer = getDisplayBuffer(ditherMode);
     uint16_t rgb565[width];
     
@@ -132,10 +134,12 @@ int main()
           //rgb.applyGamma(0.5f);
           buffer.setPixel(x, y, rgb);
         }
-        DEBUG_LOG_IF((y % 10 == 0), "Conversion: " << (int)((float)y / (float) buffer.height * 100.0f) << "%");
+        DEBUG_LOG_IF((y % 40 == 0), "Conversion: " << (int)((float)y / (float) buffer.height * 100.0f) << "%");
       }
     }
-    DEBUG_LOG("Picture converted. Displaying...");
+
+    auto elapsedTimeMs = to_ms_since_boot(get_absolute_time()) - startTime;
+    DEBUG_LOG("Picture converted in " << elapsedTimeMs << " ms");
     inky->show();
   });
 
