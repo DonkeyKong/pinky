@@ -66,6 +66,17 @@ struct InkyEeprom
   uint8_t pcbVariant;
   DisplayVariant displayVariant;
   char writeTime[22];
+
+  void print() const
+  {
+      std::cout << "Display EEPROM:" << std::endl;
+      std::cout << "    Width: " << width << std::endl;
+      std::cout << "    Height: " << height << std::endl;
+      std::cout << "    Color Capability: " << (int)colorCapability << std::endl;
+      std::cout << "    PCB Variant: " << (int)pcbVariant << std::endl;
+      std::cout << "    Display Variant: " << (int)displayVariant << std::endl;
+      std::cout << "    Write Time: " << writeTime << std::endl;
+  }
 };
 #pragma pack(pop)
 
@@ -326,7 +337,8 @@ class InkySSD1683 final : public InkyBase
       ++i;
       if (i*10 > timeoutMs)
       {
-        DEBUG_LOG("Timed out while wating for display to finish an operation.");
+        DEBUG_LOG("Display operation is running long.");
+        i = 0;
       }
     }
   }
@@ -640,7 +652,8 @@ void InkyUC8159::waitForBusy(int timeoutMs)
     ++i;
     if (i*10 > timeoutMs)
     {
-      DEBUG_LOG("Timed out while wating for display to finish an operation.");
+      DEBUG_LOG("Display operation is running long.");
+      i = 0;
     }
   }
 }
@@ -663,6 +676,8 @@ void InkyUC8159::show()
 
 InkyEeprom readEeprom(const InkyConfig& config)
 {
+  static_assert(sizeof(InkyEeprom) == 29, "InkyEeprom must be 29 bytes");
+
   InkyEeprom eeprom
   {
     .width = 0,
@@ -697,7 +712,8 @@ std::unique_ptr<Inky> Inky::Create(const InkyConfig& config)
     case DisplayVariant::Seven_Colour_640x400_UC8159_v2:
       return std::make_unique<InkyUC8159>(config, InkyEeprom);
     default:
-      DEBUG_LOG("Unknown display detected, assuming InkySSD1683");
-      return std::make_unique<InkySSD1683>(config, InkyEeprom);
+      DEBUG_LOG("Display not created (EEPROM error)");
+      InkyEeprom.print();
+      return nullptr;
   }
 }

@@ -24,12 +24,6 @@ enum class ColorName : uint8_t
 
 typedef uint8_t IndexedColor;
 
-struct IndexLabIntPair
-{
-  IndexedColor index;
-  Vec3i labInt;
-};
-
 struct IndexedColorMap
 {
   IndexedColorMap() = default;
@@ -47,7 +41,6 @@ struct IndexedColorMap
   const std::vector<IndexedColor>& indexedColors() const;
   const std::vector<ColorName>& namedColors() const;
 private:
-  void calculateFastDeltaELookup();
   std::vector<IndexedColor> indexedColors_;
   std::vector<ColorName> namedColors_;
   std::unordered_map<IndexedColor,ColorName> indexToName;
@@ -56,8 +49,6 @@ private:
   std::unordered_map<ColorName,IndexedColor> nameToIndex;
   std::unordered_map<ColorName,RGBColor> nameToRgb;
   std::unordered_map<ColorName,LabColor> nameToLab;
-  std::vector<IndexLabIntPair> fastDeltaELookup;
-  int size_;
 };
 
 
@@ -80,19 +71,6 @@ IndexedColorMap::IndexedColorMap(std::vector<std::tuple<ColorName,IndexedColor,R
     nameToIndex[name] = index;
     nameToRgb[name] = rbg;
     nameToLab[name] = indexToLab[index];
-  }
-
-  size_ = indexedColors_.size();
-  calculateFastDeltaELookup();
-}
-
-void IndexedColorMap::calculateFastDeltaELookup()
-{
-  int i = 0;
-  fastDeltaELookup.resize(size_);
-  for (const auto& [indexedColor, refColor] : indexToLab)
-  {
-    fastDeltaELookup[i++] = {indexedColor, {(int)refColor.L, (int)refColor.a, (int)refColor.b}};
   }
 }
 
@@ -125,7 +103,6 @@ void IndexedColorMap::normalizePaletteByRgb(bool pinBlack, bool pinWhite)
     indexToLab[index] = colorLab;
     nameToLab[name] = colorLab;
   }
-  calculateFastDeltaELookup();
 }
 
 void IndexedColorMap::normalizePaletteByLab(bool pinBlack, bool pinWhite)
@@ -147,7 +124,6 @@ void IndexedColorMap::normalizePaletteByLab(bool pinBlack, bool pinWhite)
     indexToLab[index] = colorLab;
     nameToLab[name] = colorLab;
   }
-  calculateFastDeltaELookup();
 }
 
 const std::vector<IndexedColor>& IndexedColorMap::indexedColors() const 
@@ -160,24 +136,23 @@ const std::vector<ColorName>& IndexedColorMap::namedColors() const
   return namedColors_;
 }
 
-IndexedColor IndexedColorMap::toIndexedColor(const LabColor& inputColor, LabColor& error) const
+IndexedColor IndexedColorMap::toIndexedColor(const LabColor& color, LabColor& error) const
 {
   // Find the indexed color with the minimum deltaE from the specified color
-  Vec3i inputColorInt {(int)inputColor.L, (int)inputColor.a, (int)inputColor.b};
-  int minDeltaE = std::numeric_limits<int>::max();
+  float minDeltaE = std::numeric_limits<float>::infinity();
   IndexedColor minIndexColor = 0;
-
-  for (auto& paletteColor : fastDeltaELookup)
+  LabColor minLabColor;
+  for (const auto& [indexedColor, refColor] : indexToLab)
   {
-    Vec3i d = inputColorInt-paletteColor.labInt;
-    int dE = d.X*d.X+d.Y*d.Y+d.Z*d.Z;
+    float dE = refColor.deltaE(color);
     if (dE < minDeltaE)
     {
       minDeltaE = dE;
-      minIndexColor = paletteColor.index;
+      minIndexColor = indexedColor;
+      minLabColor = refColor;
     }
   }
-  error = inputColor - indexToLab.at(minIndexColor);
+  error = color - minLabColor;
   return minIndexColor;
 }
 
