@@ -1,3 +1,6 @@
 [submodule "deps/pi-pico-cpp"]
 	path = deps/pi-pico-cpp
 	url = https://github.com/DonkeyKong/pi-pico-cpp.git
+[submodule "deps/Arducam_Mega"]
+	path = deps/Arducam_Mega
+	url = https://github.com/ArduCAM/Arducam_Mega.git

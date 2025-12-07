@@ -44,12 +44,17 @@ pico_sdk_init()
 # Create executable
 add_executable(${PROJECT_NAME}
   src/pinky.cpp
+  src/cam_spi_master.c
+  deps/Arducam_Mega/src/Arducam_Mega.cpp
+  deps/Arducam_Mega/src/Arducam/ArducamCamera.c
+  
 )
 
 # Add pi-pico-cpp and current dir to include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
-  ${CMAKE_CURRENT_LIST_DIR}/src
-  ${CMAKE_CURRENT_LIST_DIR}/deps/pi-pico-cpp/include
+  src
+  deps/pi-pico-cpp/include
+  deps/Arducam_Mega/src
 )
 
 # Generate all PIO headers

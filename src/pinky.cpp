@@ -11,6 +11,9 @@
 #include <iostream>
 #include <malloc.h>
 
+#include "cam_spi_master.h"
+#include <Arducam_Mega.h>
+
 uint32_t getTotalHeap() 
 {
    extern char __StackLimit, __bss_end__;
@@ -52,11 +55,36 @@ int main()
   // }
   // std::cout << "Load complete!" << std::endl;
 
+  Arducam_Mega cam(CAM_CSn_PIN);
+  cam.begin();
+  cam.setAutoExposure(0);
+  cam.setAutoISOSensitive(0);
+  cam.takePicture(CAM_IMAGE_MODE_VGA, CAM_IMAGE_PIX_FMT_RGB565);
+
   auto inky = Inky::Create();
 
   CommandParser parser;
   float testSaturation = 0.9f;
   float testValue = 0.9f;
+  float testAccuracy = 0.95f;
+  bool testRings = false;
+
+  auto labDitherBuf = std::make_shared<LabDitherView>(inky->bufferIndexed());
+  auto rgbDitherBuf = std::make_shared<RGBDitherView>(inky->bufferIndexed());
+  auto rgbBuf = std::make_shared<RGBToIndexedImageView>(inky->bufferIndexed());
+
+  auto getDisplayBuffer = [&](int ditherMode)->RGBImageView&
+  {
+    switch(ditherMode)
+    {
+      case 0: 
+        return *labDitherBuf.get();
+      case 1: 
+        return *rgbDitherBuf.get();
+      default:
+        return *rgbBuf.get();
+    }
+  };
 
   parser.addCommand("eeprom", "", "Print out eeprom data read from the display",[&]()
   {
@@ -69,10 +97,52 @@ int main()
       std::cout << "    Write Time: " << inky->eeprom().writeTime << std::endl;
   });
 
-  parser.addProperty("dither", inky->bufferRGB().ditherEnabled, false, "Dither Enabled: 0 or 1, default 1");
-  parser.addProperty("da", inky->bufferRGB().ditherAccuracy, false, "Dither Accuracy: 0.5 - 1.0, default 0.95");
+  parser.addCommand("snap", "", "Snap a photo and display it.", [&](int ditherMode){
+
+    DEBUG_LOG("Taking photo...");
+    int height = 480; int width = 640;
+    cam.takePicture(CAM_IMAGE_MODE_VGA, CAM_IMAGE_PIX_FMT_RGB565);
+
+    if (cam.getReceivedLength() != (width * height * 2))
+    {
+      std::cout << "Bad image size! Got " << cam.getReceivedLength() << " bytes, expected " << (width * height * 2) << " bytes" << std::endl;
+      return;
+    }
+
+    auto& buffer = getDisplayBuffer(ditherMode);
+    uint16_t rgb565[width];
+    
+    for (int y=0; y < height; ++y)
+    {
+      // Collect one line of the image
+      int readX = 0;
+      while (readX < width)
+      {
+        uint8_t bytesRead = cam.readBuff((uint8_t*)(&rgb565[readX]), std::min(127, width-readX) * 2);
+        readX += (bytesRead / 2);
+      }
+
+      // Write the line to the eInk display
+      if (y < buffer.height)
+      {
+        RGBColor rgb;
+        for (int x=0; x < std::min(width, buffer.width); ++x)
+        {
+          rgb = RGBColor::fromRGB565(rgb565[x]);
+          //rgb.applyGamma(0.5f);
+          buffer.setPixel(x, y, rgb);
+        }
+        DEBUG_LOG_IF((y % 10 == 0), "Conversion: " << (int)((float)y / (float) buffer.height * 100.0f) << "%");
+      }
+    }
+    DEBUG_LOG("Picture converted. Displaying...");
+    inky->show();
+  });
+
   parser.addProperty("t1_s", testSaturation, false, "Test Pattern 1, Saturation");
   parser.addProperty("t1_v", testValue, false, "Test Pattern 1, Value");
+  parser.addProperty("t1_da", testAccuracy, false, "Test Pattern 1, Dither Accuracy");
+  parser.addProperty("t1_rings", testRings, false, "Test Pattern 1, Rings enabled");
 
   parser.addCommand("props", [&](){ parser.printPropertyValues(); });
   parser.addCommand("test", "pattern", "Show a color test pattern",[&](int pattern)
@@ -81,7 +151,7 @@ int main()
     {
       // Color bar pattern, written directly in indexed colors
       const auto& indexedColors = inky->getColorMap()->indexedColors();
-      auto& bufIndexed = inky->bufferIndexed();
+      auto& bufIndexed = *inky->bufferIndexed().get();
       int colsPerColor = bufIndexed.width / indexedColors.size();
       for (int y = 0; y < bufIndexed.height; ++y)
       {
@@ -91,29 +161,32 @@ int main()
         }
       }
     }
-    else if (pattern == 1)
+    else if (pattern == 1 || pattern == 2)
     {
-      // RGB bullseye, written in RGB space
-      auto& buffer = inky->bufferRGB();
+      rgbDitherBuf->ditherAccuracy = testAccuracy;
+      labDitherBuf->ditherAccuracy = testAccuracy;
+      RGBImageView* buffer;
+      if (pattern == 1) buffer = rgbDitherBuf.get();
+      if (pattern == 2) buffer = labDitherBuf.get();
 
-      int centerX = buffer.width / 2;
-      int centerY = buffer.height / 2;
-      float radius = (float)buffer.width / 2.0f * 1.2f;
+      int centerX = buffer->width / 2;
+      int centerY = buffer->height / 2;
+      float radius = (float)buffer->width / 2.0f * 0.9f;
 
-      for (int y=0; y < buffer.height; ++y)
+      for (int y=0; y < buffer->height; ++y)
       {
-        DEBUG_LOG_IF((y % 10 == 0), "Generation: " << (int)((float)y / (float) buffer.height * 100.0f) << "%");
-        for (int x=0; x < buffer.width; ++x)
+        DEBUG_LOG_IF((y % 10 == 0), "Generation: " << (int)((float)y / (float) buffer->height * 100.0f) << "%");
+        for (int x=0; x < buffer->width; ++x)
         {
           float dist = sqrt(powf(x-centerX, 2.0f) + powf(y-centerY, 2.0f));
           float hue = remap(dist, 40.0f, radius, 0.0f, 360.0f);
-          if ((int)dist % 20 < 3)
+          if (testRings && (int)dist % 20 < 3)
           {
-            buffer.setPixel(x,y,{0,0,0});
+            buffer->setPixel(x,y,{0,0,0});
           }
           else
           {
-            buffer.setPixel(x,y, HSVColor{hue, testSaturation, testValue}.toRGB());
+            buffer->setPixel(x,y, HSVColor{hue, testSaturation, testValue}.toRGB());
           }
         }
       }

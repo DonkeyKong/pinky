@@ -79,11 +79,11 @@ public:
   virtual ~Inky() = 0;
 
   // Get a buffer to draw to the display using indexed colors
-  virtual IndexedImageView& bufferIndexed() = 0;
+  virtual std::shared_ptr<IndexedImageView> bufferIndexed() = 0;
 
   // Get a buffer to draw to the display using RGB colors
   // Supports advanced dithering (TBI)
-  virtual RGBToIndexedImageView& bufferRGB() = 0;
+  virtual std::shared_ptr<RGBImageView> bufferRGB() = 0;
 
   // Get the colormap used to convert RGB to the display's indexed colors
   virtual std::shared_ptr<const IndexedColorMap> getColorMap() const = 0;
@@ -380,14 +380,14 @@ public:
     bufRgb_ = std::make_shared<RGBToIndexedImageView>(bufIndexed_);
   }
 
-  virtual IndexedImageView& bufferIndexed() override
+  virtual std::shared_ptr<IndexedImageView> bufferIndexed() override
   {
-    return *(bufIndexed_.get());
+    return bufIndexed_;
   }
 
-  virtual RGBToIndexedImageView& bufferRGB() override
+  virtual std::shared_ptr<RGBImageView> bufferRGB() override
   {
-    return *(bufRgb_.get());
+    return bufRgb_;
   }
 
   virtual void show() override
@@ -449,7 +449,7 @@ public:
   virtual void clear() override
   {
     auto whiteColor = colorMap_->toIndexedColor(ColorName::White);
-    auto& bufIndexed = bufferIndexed();
+    auto& bufIndexed = *bufIndexed_.get();
     for (int y=0; y < eeprom_.height; ++y)
     {
       for (int x=0; x < eeprom_.width; ++x)
@@ -521,14 +521,14 @@ public:
     reset_.set(true);
   }
 
-  virtual IndexedImageView& bufferIndexed() override
+  virtual std::shared_ptr<IndexedImageView> bufferIndexed() override
   {
-    return *(buf_.get());
+    return buf_;
   }
 
-  virtual RGBToIndexedImageView& bufferRGB() override
+  virtual std::shared_ptr<RGBImageView> bufferRGB() override
   {
-    return *(bufRgb_.get());
+    return bufRgb_;
   }
 
   virtual void show() override;
@@ -536,7 +536,7 @@ public:
   virtual void clear() override
   {
     auto cleanColor = colorMap_->toIndexedColor(ColorName::Clean);
-    auto& bufIndexed = bufferIndexed();
+    auto& bufIndexed = *buf_.get();
     for (int y=0; y < eeprom_.height; ++y)
     {
       for (int x=0; x < eeprom_.width; ++x)
