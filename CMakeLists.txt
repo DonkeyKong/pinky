@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.18)
 set(PROJECT_NAME "pinky")
 
 # Choose between "pico" and "picow" for your target board
-set(PICO_BOARD "pico_w")
+set(PICO_BOARD "pico2")
 
 # We assume the pico-sdk is located at /pico-sdk because
 # this is where we mount it in the docker
