@@ -58,10 +58,10 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 
 # Generate all PIO headers
-# file(GLOB pio_files "deps/pi-pico-cpp/pio/*.pio")
-# foreach(pio_file ${pio_files})
-#   pico_generate_pio_header(${PROJECT_NAME} ${pio_file})
-# endforeach()
+file(GLOB pio_files "deps/pi-pico-cpp/pio/*.pio")
+foreach(pio_file ${pio_files})
+  pico_generate_pio_header(${PROJECT_NAME} ${pio_file})
+endforeach()
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC "LOGGING_ENABLED")
 target_compile_definitions(${PROJECT_NAME} PUBLIC "DEBUG_SPI")
@@ -77,7 +77,7 @@ target_link_libraries(${PROJECT_NAME}
         # pico_multicore
         # pico_time
         # pico_sync 
-        # hardware_pio
+        hardware_pio
         # pico_cyw43_arch_lwip_poll
 )
 

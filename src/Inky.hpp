@@ -689,7 +689,9 @@ InkyEeprom readEeprom(const InkyConfig& config)
   strcpy(eeprom.writeTime, "invalid");
   
   I2CInterface i2c(config.I2CInstance, config.I2C_SDA_PIN, config.I2C_SCL_PIN, 100000);
+  I2CRegister<uint8_t> eepromRegisterReset(i2c, config.I2CDeviceId, 0);
   I2CRegister<InkyEeprom> eepromRegister(i2c, config.I2CDeviceId, 0);
+  eepromRegisterReset.set(0);
   eepromRegister.get(eeprom);
 
   // Null terminate the string just in case

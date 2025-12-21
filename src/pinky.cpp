@@ -1,7 +1,10 @@
 #include "Settings.hpp"
 #include "Inky.hpp"
-#include "cpp/CommandParser.hpp"
-#include "cpp/Math.hpp"
+
+#include <cpp/Button.hpp>
+#include <cpp/LedStripWs2812b.hpp>
+#include <cpp/CommandParser.hpp>
+#include <cpp/Math.hpp>
 
 #include <pico/stdlib.h>
 #include <pico/stdio.h>
@@ -55,6 +58,37 @@ int main()
   // }
   // std::cout << "Load complete!" << std::endl;
 
+  GPIOButton shutterButton(9);
+  LedStripWs2812b leds(16);
+  LEDBuffer buf(6);
+  float lastT{-1.0f};
+  RGBColor lastFg, lastBg;
+  auto showProgressOnLeds = [&](float t, RGBColor fg, RGBColor bg = {0,0,0})
+  {    
+    if (t == lastT && fg == lastFg && bg == lastBg)
+    {
+      return;
+    }
+
+    lastT = t;
+    lastFg = fg;
+    lastBg = bg;
+    int thresh = remap(t, 0.0f, 0.95f, 0, (int)buf.size());
+    for (int i = 0; i < buf.size(); ++i)
+    {
+      if (i < thresh)
+      {
+        buf[i] = fg;
+      }
+      else
+      {
+        buf[i] = bg;
+      }
+    }
+
+    leds.writeColors(buf, 0.25f);
+  };
+
   Arducam_Mega cam(CAM_CSn_PIN);
   cam.begin();
   cam.setAutoExposure(0);
@@ -98,11 +132,11 @@ int main()
   {
     // Reboot into programming mode
     std::cout << "rebooting into programming mode..." << std::endl << std::flush;
-    inky->~Inky();
+    if (inky) inky->~Inky();
     rebootIntoProgMode();
   });
 
-  parser.addCommand("reboot", "", "Reboot into programming mode",[&]()
+  parser.addCommand("reboot", "", "Reboot",[&]()
   {
       // Reboot the system immediately
       std::cout << "rebooting..." << std::endl << std::flush;
@@ -113,6 +147,7 @@ int main()
   float testSaturation = 0.9f;
   float testValue = 0.9f;
   bool testRings = false;
+  bool ledStateDirty = true;
 
   if (inky)
   {
@@ -129,8 +164,10 @@ int main()
     parser.addCommand("snap", "", "Snap a photo and display it.", [&](int ditherMode){
 
       DEBUG_LOG("Taking photo...");
+      showProgressOnLeds(1.0f, {255,0,0});
       int height = 480; int width = 640;
       cam.takePicture(CAM_IMAGE_MODE_VGA, CAM_IMAGE_PIX_FMT_RGB565);
+      showProgressOnLeds(1.0f, {0,255,0});
 
       if (cam.getReceivedLength() != (width * height * 2))
       {
@@ -157,13 +194,19 @@ int main()
         if (y < buffer.height)
         {
           RGBColor rgb;
+          Vec3f m { 1.2f, 1.2f, 1.2f };
           for (int x=0; x < std::min(width, buffer.width); ++x)
           {
             rgb = RGBColor::fromRGB565(rgb565[x]);
-            //rgb.applyGamma(0.8f);
-            buffer.setPixel(x, y, rgb);
+            rgb.applyGamma(0.9f);
+            buffer.setPixel(x, y, rgb*m);
           }
-          DEBUG_LOG_IF((y % 40 == 0), "Conversion: " << (int)((float)y / (float) buffer.height * 100.0f) << "%");
+          float progress = (float)y / (float) buffer.height;
+          DEBUG_LOG_IF((y % 40 == 0), "Conversion: " << (int)(progress * 100.0f) << "%");
+          if (progress > 0.17f)
+          {
+            showProgressOnLeds(progress, {0,128,255});
+          }
         }
       }
 
@@ -237,8 +280,19 @@ int main()
     sleep_until(nextEvalTime);
     nextEvalTime = make_timeout_time_ms(50);
 
-    // Do stuff
+    // Check for USB I/O
     parser.processStdIo();
+
+    // Check for the shutter button being pressed
+    shutterButton.update();
+    if (shutterButton.buttonDown())
+    {
+      parser.processCommand("snap 0");
+    }
+    else
+    {
+      showProgressOnLeds(0.0f, {0,0,0});
+    }
   }
   return 0;
 }
