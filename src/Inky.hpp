@@ -26,15 +26,6 @@ struct InkyConfig
   uint DC_PIN = 8;    // delay/command (gpio)
 };
 
-enum class ColorCapability : uint8_t
-{
-  BlackWhite = 1,
-  BlackWhiteRed = 2,
-  BlackWhiteYellow = 3,
-  SevenColor = 4,
-  SevenColorv2 = 5
-};
-
 enum class DisplayVariant : uint8_t
 {
     Red_pHAT_High_Temp = 1,
@@ -55,6 +46,15 @@ enum class DisplayVariant : uint8_t
     Red_wHAT_SSD1683 = 18,
     Yellow_wHAT_SSD1683 = 19,
     InvalidDisplayType = 255
+};
+
+enum class ColorCapability : uint8_t
+{
+  BlackWhite = 1,
+  BlackWhiteRed = 2,
+  BlackWhiteYellow = 3,
+  SevenColor = 4,
+  SevenColorv2 = 5,
 };
 
 #pragma pack(push, 1)
@@ -92,12 +92,8 @@ public:
   // Get a buffer to draw to the display using indexed colors
   virtual std::shared_ptr<IndexedImageView> bufferIndexed() = 0;
 
-  // Get a buffer to draw to the display using RGB colors
-  // Supports advanced dithering (TBI)
-  virtual std::shared_ptr<RGBImageView> bufferRGB() = 0;
-
   // Get the colormap used to convert RGB to the display's indexed colors
-  virtual std::shared_ptr<const IndexedColorMap> getColorMap() const = 0;
+  virtual std::shared_ptr<IndexedColorMap> getColorMap() const = 0;
   // Set the color of the bonder pixels
   virtual void setBorder(IndexedColor color) = 0;
   // Get the display eeprom info fetched from I2C before connection
@@ -187,7 +183,7 @@ protected:
   DiscreteOut reset_;
   DiscreteOut dc_;
 
-  std::shared_ptr<const IndexedColorMap> colorMap_;
+  std::shared_ptr<IndexedColorMap> colorMap_;
   IndexedColor border_;
 
   InkyBase(const InkyConfig& config, InkyEeprom InkyEeprom, uint32_t spiSpeedHz, uint32_t spiTransferSizeBytes) : 
@@ -205,51 +201,7 @@ protected:
     busy_{config.BUSY_PIN},
     reset_{config.RESET_PIN},
     dc_{config.DC_PIN}
-  {
-    std::vector<std::tuple<ColorName,IndexedColor,RGBColor>> displayColors;
-    switch (eeprom_.colorCapability)
-    {
-      case ColorCapability::BlackWhite:
-        displayColors = 
-        {
-          {ColorName::White, 0, {255,255,255}},
-          {ColorName::Black, 1, {0,0,0}}
-        };
-        break;
-      case ColorCapability::BlackWhiteRed:
-        displayColors = 
-        {
-          {ColorName::White, 0, {255,255,255}},
-          {ColorName::Black, 1, {0,0,0}},
-          {ColorName::Red, 2, {255,0,0}}
-        };
-        break;
-      case ColorCapability::BlackWhiteYellow:
-        displayColors = 
-        {
-          {ColorName::White, 0, {255,255,255}},
-          {ColorName::Black, 1, {0,0,0}},
-          {ColorName::Yellow, 2, {255,0,0}}
-        };
-        break;
-      case ColorCapability::SevenColor:
-      case ColorCapability::SevenColorv2:
-        displayColors = 
-          {
-            {ColorName::Black, 0, {0, 0, 0}},
-            {ColorName::White, 1, {255, 255, 255}},
-            {ColorName::Green, 2, {81, 128, 44}},
-            {ColorName::Blue, 3, {90, 78, 144}},
-            {ColorName::Red, 4, {240, 96, 87}},
-            {ColorName::Yellow, 5, {255, 255, 152}},
-            {ColorName::Orange, 6, {255, 157, 125}}
-          };
-        break;
-    }
-    
-    colorMap_ = std::make_shared<const IndexedColorMap>(displayColors);
-    border_ = colorMap_->toIndexedColor(ColorName::White);
-  }
+  { }
 
   virtual void setBorder(IndexedColor color) override
   {
@@ -261,7 +213,7 @@ protected:
     return eeprom_;
   }
 
-  virtual std::shared_ptr<const IndexedColorMap> getColorMap() const override
+  virtual std::shared_ptr<IndexedColorMap> getColorMap() const override
   {
     return colorMap_;
   }
@@ -357,7 +309,6 @@ class InkySSD1683 final : public InkyBase
 
   std::shared_ptr<PackedTwoPlaneBinaryImage> buf_;
   std::shared_ptr<IndexedToPackedTwoPlaneBinaryImageView> bufIndexed_;
-  std::shared_ptr<RGBToIndexedImageView> bufRgb_;
 
 
 public:
@@ -369,6 +320,32 @@ public:
     {
       DEBUG_LOG("WARNING: Unsupported display type for InkySSD1683!");
     }
+
+    if (info.colorCapability == ColorCapability::BlackWhite)
+    {
+      colorMap_ = std::make_shared<IndexedColorMap>(ColorMapArgList{
+        {ColorName::White, 0, ColorNameToSaturatedRGBColor(ColorName::White)},
+        {ColorName::Black, 1, ColorNameToSaturatedRGBColor(ColorName::Black)}
+      });
+    }
+    else if (info.colorCapability == ColorCapability::BlackWhiteRed)
+    {
+      colorMap_ = std::make_shared<IndexedColorMap>(ColorMapArgList{
+        {ColorName::White, 0, ColorNameToSaturatedRGBColor(ColorName::White)},
+        {ColorName::Black, 1, ColorNameToSaturatedRGBColor(ColorName::Black)},
+        {ColorName::Red, 2, ColorNameToSaturatedRGBColor(ColorName::Red)}
+      });
+    }
+    else if (info.colorCapability == ColorCapability::BlackWhiteYellow)
+    {
+      colorMap_ = std::make_shared<IndexedColorMap>(ColorMapArgList{
+        {ColorName::White, 0, ColorNameToSaturatedRGBColor(ColorName::White)},
+        {ColorName::Black, 1, ColorNameToSaturatedRGBColor(ColorName::Black)},
+        {ColorName::Yellow, 2, ColorNameToSaturatedRGBColor(ColorName::Yellow)}
+      });
+    }
+
+    border_ = colorMap_->toIndexedColor(ColorName::Black);
 
     // Setup the GPIO pins
     dc_.set(false);
@@ -389,17 +366,11 @@ public:
       color, 
       color
     );
-    bufRgb_ = std::make_shared<RGBToIndexedImageView>(bufIndexed_);
   }
 
   virtual std::shared_ptr<IndexedImageView> bufferIndexed() override
   {
     return bufIndexed_;
-  }
-
-  virtual std::shared_ptr<RGBImageView> bufferRGB() override
-  {
-    return bufRgb_;
   }
 
   virtual void show() override
@@ -491,7 +462,6 @@ class InkyUC8159 final : public InkyBase
   void waitForBusy(int timeoutMs = 40000);
 
   std::shared_ptr<Packed4BitIndexedImage> buf_;
-  std::shared_ptr<RGBToIndexedImageView> bufRgb_;
 
 public:
   InkyUC8159(const InkyConfig& config, InkyEeprom info) : InkyBase(config, info, SPIDeviceSpeedHz, SPITransferSize)
@@ -521,12 +491,23 @@ public:
         break;
     }
 
+    colorMap_ = std::make_shared<IndexedColorMap>(ColorMapArgList{
+        // Emperically measured colors
+        {ColorName::Black, 0, {36, 39, 63}},
+        {ColorName::White, 1, {195, 185, 184}},
+        {ColorName::Green, 2, {56, 76, 46}},
+        {ColorName::Blue, 3, {59, 54, 86}},
+        {ColorName::Red, 4, {133, 55, 46}},
+        {ColorName::Yellow, 5, {195, 158, 56}},
+        {ColorName::Orange, 6, {159, 83, 57}}
+    });
+    border_ = colorMap_->toIndexedColor(ColorName::Black);
+
     // Correct the eeprom and buffer sizes
     eeprom_.width = correctionData.cols;
     eeprom_.height = correctionData.rows;
 
     buf_ = std::make_shared<Packed4BitIndexedImage>(eeprom_.width, eeprom_.height, colorMap_);
-    bufRgb_ = std::make_shared<RGBToIndexedImageView>(buf_);
 
     // Setup the GPIO pins
     dc_.set(false);
@@ -536,11 +517,6 @@ public:
   virtual std::shared_ptr<IndexedImageView> bufferIndexed() override
   {
     return buf_;
-  }
-
-  virtual std::shared_ptr<RGBImageView> bufferRGB() override
-  {
-    return bufRgb_;
   }
 
   virtual void show() override;

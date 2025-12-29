@@ -1,5 +1,6 @@
 #include "Settings.hpp"
 #include "Inky.hpp"
+#include "ColorMapEffect.hpp"
 
 #include <cpp/Button.hpp>
 #include <cpp/LedStripWs2812b.hpp>
@@ -16,6 +17,7 @@
 
 #include "cam_spi_master.h"
 #include <Arducam_Mega.h>
+#include <magic_enum/magic_enum.hpp>
 
 uint32_t getTotalHeap() 
 {
@@ -58,7 +60,9 @@ int main()
   // }
   // std::cout << "Load complete!" << std::endl;
 
-  GPIOButton shutterButton(9);
+  GPIOButton shutterButton(9, true);
+  shutterButton.holdActivationRepeatMs(-1); // Don't send more than one held event ever
+
   LedStripWs2812b leds(16);
   LEDBuffer buf(6);
   float lastT{-1.0f};
@@ -86,7 +90,7 @@ int main()
       }
     }
 
-    leds.writeColors(buf, 0.25f);
+    leds.writeColors(buf, 0.1f);
   };
 
   Arducam_Mega cam(CAM_CSn_PIN);
@@ -96,28 +100,7 @@ int main()
   cam.takePicture(CAM_IMAGE_MODE_VGA, CAM_IMAGE_PIX_FMT_RGB565);
 
   std::unique_ptr<Inky> inky = Inky::Create();
-  std::shared_ptr<LabDitherView> labDitherBuf;
-  std::shared_ptr<RGBDitherView> rgbDitherBuf;
-  std::shared_ptr<RGBToIndexedImageView> rgbBuf;
-  auto getDisplayBuffer = [&](int ditherMode)->RGBImageView&
-  {
-    switch(ditherMode)
-    {
-      case 0: 
-        return *labDitherBuf.get();
-      case 1: 
-        return *rgbDitherBuf.get();
-      default:
-        return *rgbBuf.get();
-    }
-  };
-
-  if (inky)
-  {
-    labDitherBuf = std::make_shared<LabDitherView>(inky->bufferIndexed());
-    rgbDitherBuf = std::make_shared<RGBDitherView>(inky->bufferIndexed());
-    rgbBuf = std::make_shared<RGBToIndexedImageView>(inky->bufferIndexed());
-  }
+  std::shared_ptr<IndexedColorMap> colorMap;
 
   CommandParser parser;
   
@@ -148,20 +131,47 @@ int main()
   float testValue = 0.9f;
   bool testRings = false;
   bool ledStateDirty = true;
+  float ditherAccuracy = 0.95f;
 
   if (inky)
   {
     parser.addProperty("t1_s", testSaturation, false, "Test Pattern 1, Saturation");
     parser.addProperty("t1_v", testValue, false, "Test Pattern 1, Value");
     parser.addProperty("t1_rings", testRings, false, "Test Pattern 1, Rings enabled");
-    parser.addProperty("dither_accuracy", labDitherBuf->ditherAccuracy, false, "Lab Dither error propigation rate. (default 0.95)");
+    parser.addProperty("dither_accuracy", ditherAccuracy, false, "Lab Dither error propigation rate. (default 0.95)");
 
     parser.addCommand("eeprom", "", "Print out eeprom data read from the display",[&]()
     {
       inky->eeprom().print();
     });
 
-    parser.addCommand("snap", "", "Snap a photo and display it.", [&](int ditherMode){
+    parser.addCommand("effect", "[val]", "", [&](std::string name) {
+
+      std::optional<ColorMapEffect> effect;
+      colorMap.reset();
+
+      if (!effect)
+      {
+        effect = magic_enum::enum_cast<ColorMapEffect>(name, magic_enum::case_insensitive);
+      }
+
+      if (!effect)
+      {
+        effect = magic_enum::enum_cast<ColorMapEffect>(atoi(name.c_str()));
+      }
+
+      if (effect)
+      {
+        colorMap = getColorMapWithEffect(*inky->getColorMap(), effect.value());
+      }
+      
+      if (colorMap)
+        std::cout << "Set custom effect" << std::endl;
+      else
+        std::cout << "Cleared custom effect" << std::endl;
+    });
+
+    parser.addCommand("snap", "", "Snap a photo and display it.", [&](){
 
       DEBUG_LOG("Taking photo...");
       showProgressOnLeds(1.0f, {255,0,0});
@@ -177,7 +187,9 @@ int main()
 
       auto startTime = to_ms_since_boot(get_absolute_time());
 
-      auto& buffer = getDisplayBuffer(ditherMode);
+      LabDitherView buffer(inky->bufferIndexed(), colorMap);
+      buffer.ditherAccuracy = ditherAccuracy;
+
       uint16_t rgb565[width];
       
       for (int y=0; y < height; ++y)
@@ -194,12 +206,10 @@ int main()
         if (y < buffer.height)
         {
           RGBColor rgb;
-          Vec3f m { 1.2f, 1.2f, 1.2f };
           for (int x=0; x < std::min(width, buffer.width); ++x)
           {
             rgb = RGBColor::fromRGB565(rgb565[x]);
-            rgb.applyGamma(0.9f);
-            buffer.setPixel(x, y, rgb*m);
+            buffer.setPixel(x, y, rgb);
           }
           float progress = (float)y / (float) buffer.height;
           DEBUG_LOG_IF((y % 40 == 0), "Conversion: " << (int)(progress * 100.0f) << "%");
@@ -233,7 +243,8 @@ int main()
       }
       else if (pattern == 1)
       {
-        RGBImageView& buffer = *labDitherBuf.get();
+        LabDitherView buffer(inky->bufferIndexed(), colorMap);
+        buffer.ditherAccuracy = ditherAccuracy;
 
         int centerX = buffer.width / 2;
         int centerY = buffer.height / 2;
@@ -285,14 +296,20 @@ int main()
 
     // Check for the shutter button being pressed
     shutterButton.update();
-    if (shutterButton.buttonDown())
+    if (shutterButton.buttonUp())
     {
-      parser.processCommand("snap 0");
+      parser.processCommand("snap");
     }
     else
     {
       showProgressOnLeds(0.0f, {0,0,0});
     }
+
+    if (shutterButton.heldActivate())
+    {
+      parser.processCommand("test 0");
+    }
+
   }
   return 0;
 }

@@ -181,25 +181,29 @@ private:
 class RGBToIndexedImageView : public RGBImageView
 {
 public:
-  RGBToIndexedImageView(std::shared_ptr<IndexedImageView> indexed)
+  RGBToIndexedImageView(std::shared_ptr<IndexedImageView> indexed, std::shared_ptr<IndexedColorMap> colorMapOverride = nullptr)
     : RGBImageView(indexed->width, indexed->height)
     , indexed_{std::move(indexed)}
+    , colorMapOverride_{colorMapOverride}
+    , colorMap_{colorMapOverride?*colorMapOverride.get():indexed_->colorMap()}
   { }
 
   virtual ~RGBToIndexedImageView() = default;
 
   virtual RGBColor getPixel(int x, int y) const override
   {
-    return indexed_->colorMap().toRGBColor(indexed_->getPixel(x,y));
+    return colorMap_.toRGBColor(indexed_->getPixel(x,y));
   }
 
   virtual void setPixel(int x, int y, const RGBColor& color) override
   {
-    indexed_->setPixel(x,y, indexed_->colorMap().toIndexedColor(color));
+    indexed_->setPixel(x,y, colorMap_.toIndexedColor(color));
   }
 
 protected:
   std::shared_ptr<IndexedImageView> indexed_;
+  std::shared_ptr<IndexedColorMap> colorMapOverride_;
+  const IndexedColorMap& colorMap_;
 };
 
 class LabDitherView : public RGBToIndexedImageView
@@ -211,8 +215,8 @@ public:
   // Sane values: 0.5 - 1.0
   float ditherAccuracy;
 
-  LabDitherView(std::shared_ptr<IndexedImageView> indexed)
-    : RGBToIndexedImageView(std::move(indexed))
+  LabDitherView(std::shared_ptr<IndexedImageView> indexed, std::shared_ptr<IndexedColorMap> colorMapOverride = nullptr)
+    : RGBToIndexedImageView(std::move(indexed), colorMapOverride)
     , ditherAccuracy{0.95f}
     , currentDiffusionRow_{-1}
     , thisRowError_((size_t)width)
@@ -251,7 +255,7 @@ public:
 
     // Convert to nearest indexed color, saving error
     LabColor error;
-    IndexedColor nearestIndexed = indexed_->colorMap().toIndexedColor(current, error);
+    IndexedColor nearestIndexed = colorMap_.toIndexedColor(current, error);
     indexed_->setPixel(x,y,nearestIndexed);
 
     // Attenuate the error
@@ -286,93 +290,93 @@ private:
   std::vector<LabColor> nextRowError_;
 };
 
-class RGBDitherView : public RGBToIndexedImageView
-{
-public:
-  // Determines how accurate we try to make colors when doing diffusion.
-  // Lower values provide more clarity on more limited displays.
-  // Default: 0.95
-  // Sane values: 0.5 - 1.0
-  float ditherAccuracy;
+// class RGBDitherView : public RGBToIndexedImageView
+// {
+// public:
+//   // Determines how accurate we try to make colors when doing diffusion.
+//   // Lower values provide more clarity on more limited displays.
+//   // Default: 0.95
+//   // Sane values: 0.5 - 1.0
+//   float ditherAccuracy;
 
-  RGBDitherView(std::shared_ptr<IndexedImageView> indexed)
-    : RGBToIndexedImageView(std::move(indexed))
-    , ditherAccuracy{0.95f}
-    , currentDiffusionRow_{-1}
-    , thisRowError_((size_t)width)
-    , nextRowError_((size_t)width)
-  { }
+//   RGBDitherView(std::shared_ptr<IndexedImageView> indexed)
+//     : RGBToIndexedImageView(std::move(indexed))
+//     , ditherAccuracy{0.95f}
+//     , currentDiffusionRow_{-1}
+//     , thisRowError_((size_t)width)
+//     , nextRowError_((size_t)width)
+//   { }
 
-  virtual void setPixel(int x, int y, const RGBColor& color) override
-  {
-    // If diffusion is currently off or y has jumped in a weird way
-    // clear both error buffers and set the current y to be the diffusion error row
-    if (currentDiffusionRow_ == -1 || y > (currentDiffusionRow_+1) || y < currentDiffusionRow_)
-    {
-      for (int i=0; i < width; ++i)
-      {
-        nextRowError_[i] = {0,0,0};
-        thisRowError_[i] = {0,0,0};
-      }
-      currentDiffusionRow_ = y;
-    }
-    // If y has advanced by one, then swap next and current buffers 
-    // and clear the next buffer.
-    else if (currentDiffusionRow_+1 == y)
-    {
-      auto swap = std::move(nextRowError_);
-      nextRowError_ = std::move(thisRowError_);
-      thisRowError_ = std::move(swap);
-      for (int i=0; i < width; ++i)
-      {
-        nextRowError_[i] = {0,0,0};
-      }
-      currentDiffusionRow_ = y;
-    }
+//   virtual void setPixel(int x, int y, const RGBColor& color) override
+//   {
+//     // If diffusion is currently off or y has jumped in a weird way
+//     // clear both error buffers and set the current y to be the diffusion error row
+//     if (currentDiffusionRow_ == -1 || y > (currentDiffusionRow_+1) || y < currentDiffusionRow_)
+//     {
+//       for (int i=0; i < width; ++i)
+//       {
+//         nextRowError_[i] = {0,0,0};
+//         thisRowError_[i] = {0,0,0};
+//       }
+//       currentDiffusionRow_ = y;
+//     }
+//     // If y has advanced by one, then swap next and current buffers 
+//     // and clear the next buffer.
+//     else if (currentDiffusionRow_+1 == y)
+//     {
+//       auto swap = std::move(nextRowError_);
+//       nextRowError_ = std::move(thisRowError_);
+//       thisRowError_ = std::move(swap);
+//       for (int i=0; i < width; ++i)
+//       {
+//         nextRowError_[i] = {0,0,0};
+//       }
+//       currentDiffusionRow_ = y;
+//     }
 
-    Vec3i currentDesired = Vec3i{color.R, color.G, color.B} + thisRowError_[x];
+//     Vec3i currentDesired = Vec3i{color.R, color.G, color.B} + thisRowError_[x];
 
-    // Convert to nearest indexed color
-    IndexedColor nearestIndexed = indexed_->colorMap().toIndexedColor(RGBColor{
-      (uint8_t)std::clamp(currentDesired.X, 0, 255),
-      (uint8_t)std::clamp(currentDesired.Y, 0, 255),
-      (uint8_t)std::clamp(currentDesired.Z, 0, 255)
-    });
-    indexed_->setPixel(x,y,nearestIndexed);
+//     // Convert to nearest indexed color
+//     IndexedColor nearestIndexed = indexed_->colorMap().toIndexedColor(RGBColor{
+//       (uint8_t)std::clamp(currentDesired.X, 0, 255),
+//       (uint8_t)std::clamp(currentDesired.Y, 0, 255),
+//       (uint8_t)std::clamp(currentDesired.Z, 0, 255)
+//     });
+//     indexed_->setPixel(x,y,nearestIndexed);
 
-    // Calculate error
-      RGBColor realizedColor = indexed_->colorMap().toRGBColor(nearestIndexed);
-      Vec3i error = currentDesired - Vec3i{realizedColor.R, realizedColor.G, realizedColor.B};
-    error = error * ditherAccuracy;
+//     // Calculate error
+//       RGBColor realizedColor = indexed_->colorMap().toRGBColor(nearestIndexed);
+//       Vec3i error = currentDesired - Vec3i{realizedColor.R, realizedColor.G, realizedColor.B};
+//     error = error * ditherAccuracy;
 
-    // Diffuse the error into the error buffers
-    if (x < width-1)
-    {
-      thisRowError_[x+1] += error *   (7.0f / 16.0f);
-      nextRowError_[x+1] += error * (1.0f / 16.0f);
-    }
-    if (x > 0)
-    {
-      nextRowError_[x-1] += error * (3.0f / 16.0f);
-    }
-    if (y < height-1)
-    {
-      nextRowError_[x] += error *   (5.0f / 16.0f);
-    }
-  }
+//     // Diffuse the error into the error buffers
+//     if (x < width-1)
+//     {
+//       thisRowError_[x+1] += error *   (7.0f / 16.0f);
+//       nextRowError_[x+1] += error * (1.0f / 16.0f);
+//     }
+//     if (x > 0)
+//     {
+//       nextRowError_[x-1] += error * (3.0f / 16.0f);
+//     }
+//     if (y < height-1)
+//     {
+//       nextRowError_[x] += error *   (5.0f / 16.0f);
+//     }
+//   }
 
-  // Reset the accumulated diffusion error to 0
-  void resetDiffusion()
-  {
-    // This is sufficient to mark diffusion error data as invalid
-    currentDiffusionRow_ = -1;
-  }
+//   // Reset the accumulated diffusion error to 0
+//   void resetDiffusion()
+//   {
+//     // This is sufficient to mark diffusion error data as invalid
+//     currentDiffusionRow_ = -1;
+//   }
 
-private:
-  int currentDiffusionRow_;
-  std::vector<Vec3i> thisRowError_;
-  std::vector<Vec3i> nextRowError_;
-};
+// private:
+//   int currentDiffusionRow_;
+//   std::vector<Vec3i> thisRowError_;
+//   std::vector<Vec3i> nextRowError_;
+// };
 
 // Used by Black/White/Red and Black/White/Yellow Inky displays
 class PackedTwoPlaneBinaryImage : public ImageView

@@ -10,24 +10,47 @@
 #include <algorithm>
 #include <random>
 
+// When adding colors here, be sure to also add them to the function
+// ColorNameToSaturatedRGBColor as well (if they are actual colors 
+// and not control values like "clean")
 enum class ColorName : uint8_t
 {
   White,
+  Magenta,
   Red,
   Orange,
   Yellow,
   Green,
+  Cyan,
   Blue,
   Black,
-  Clean
+  Clean  // Note: not "clear". Has no set visual appearance.
 };
 
+RGBColor ColorNameToSaturatedRGBColor(ColorName name)
+{
+  switch (name)
+  {
+    case ColorName::White: return {255, 255, 255};
+    case ColorName::Magenta: return {255, 0, 255};
+    case ColorName::Red: return {255, 0, 0};
+    case ColorName::Orange: return {255, 127, 0};
+    case ColorName::Yellow: return {255, 255, 0};
+    case ColorName::Green: return {0, 255, 0};
+    case ColorName::Cyan: return {0, 255, 255};
+    case ColorName::Blue: return {0, 0, 255};
+    case ColorName::Black: return {0, 0, 0};
+    default: return {0,0,0};
+  }
+}
+
 typedef uint8_t IndexedColor;
+using ColorMapArgList = std::vector<std::tuple<ColorName,IndexedColor,RGBColor>>;
 
 struct IndexedColorMap
 {
   IndexedColorMap() = default;
-  IndexedColorMap(std::vector<std::tuple<ColorName,IndexedColor,RGBColor>> mapping);
+  IndexedColorMap(ColorMapArgList mapping, bool monochrome = false);
   // Set the colors Black and White to (0,0,0) and (255,255,255) respectively, then rescale the rest
   void normalizePaletteByRgb(bool pinBlack = true, bool pinWhite = true);
   void normalizePaletteByLab(bool pinBlack = true, bool pinWhite = true);
@@ -40,7 +63,12 @@ struct IndexedColorMap
   uint8_t size() const;
   const std::vector<IndexedColor>& indexedColors() const;
   const std::vector<ColorName>& namedColors() const;
+  bool hasDestinationColor(ColorName color) const
+  {
+    return nameToIndex.count(color) > 0;
+  }
 private:
+  bool monochrome_ = false;
   std::vector<IndexedColor> indexedColors_;
   std::vector<ColorName> namedColors_;
   std::unordered_map<IndexedColor,ColorName> indexToName;
@@ -52,7 +80,8 @@ private:
 };
 
 
-IndexedColorMap::IndexedColorMap(std::vector<std::tuple<ColorName,IndexedColor,RGBColor>> mapping)
+IndexedColorMap::IndexedColorMap(ColorMapArgList mapping, bool monochrome) :
+  monochrome_{monochrome}
 {
   if (mapping.size() > 254)
   {
@@ -61,25 +90,28 @@ IndexedColorMap::IndexedColorMap(std::vector<std::tuple<ColorName,IndexedColor,R
   }
 
   // Create exhaustive mappings
-  for (const auto& [name, index, rbg] : mapping)
+  for (const auto& [name, index, rgb] : mapping)
   {
     indexedColors_.push_back(index);
     namedColors_.push_back(name);
     indexToName[index] = name;
-    indexToRgb[index] = rbg;
-    indexToLab[index] = rbg.toLab();
     nameToIndex[name] = index;
-    nameToRgb[name] = rbg;
+
+    LabColor lab = rgb.toLab();
+    if (monochrome_)
+    {
+      uint8_t mono = (uint8_t)remapClamp(lab.L, 0.0f, 100.0f, 0.0f, 255.0f);
+      indexToRgb[index] = RGBColor{mono, mono, mono};
+      indexToLab[index] = LabColor{lab.L, 0, 0};
+    }
+    else
+    {
+      indexToRgb[index] = rgb;
+      indexToLab[index] = lab;
+    }
+    nameToRgb[name] = indexToRgb[index];
     nameToLab[name] = indexToLab[index];
   }
-}
-
-template <typename T>
-static T remap(T value, T inMin, T inMax, T outMin, T outMax)
-{
-  double t = (double)(value - inMin)/(double)(inMax-inMin);
-  double out = t * (double)(outMax-outMin) + (double)(outMin);
-  return std::clamp((T)std::clamp(out, (double)outMin, (double)outMax), outMin, outMax);
 }
 
 void IndexedColorMap::normalizePaletteByRgb(bool pinBlack, bool pinWhite)
@@ -91,9 +123,9 @@ void IndexedColorMap::normalizePaletteByRgb(bool pinBlack, bool pinWhite)
   {
     auto name = indexToName[index];
     RGBColor colorRgb = indexToRgb[index];
-    colorRgb.R = remap(colorRgb.R, min, max, (uint8_t)0, (uint8_t)255);
-    colorRgb.G = remap(colorRgb.G, min, max, (uint8_t)0, (uint8_t)255);
-    colorRgb.B = remap(colorRgb.B, min, max, (uint8_t)0, (uint8_t)255);
+    colorRgb.R = remapClamp(colorRgb.R, min, max, (uint8_t)0, (uint8_t)255);
+    colorRgb.G = remapClamp(colorRgb.G, min, max, (uint8_t)0, (uint8_t)255);
+    colorRgb.B = remapClamp(colorRgb.B, min, max, (uint8_t)0, (uint8_t)255);
     LabColor colorLab = colorRgb.toLab();
 
     // Be sure to update all the following indices
@@ -114,7 +146,7 @@ void IndexedColorMap::normalizePaletteByLab(bool pinBlack, bool pinWhite)
   {
     auto name = indexToName[index];
     LabColor colorLab = indexToLab[index];
-    colorLab.L = remap(colorLab.L, min, max, 0.0f, 100.0f);
+    colorLab.L = remapClamp(colorLab.L, min, max, 0.0f, 100.0f);
     RGBColor colorRgb = colorLab.toRGB();
 
     // Be sure to update all the following indices
@@ -142,9 +174,10 @@ IndexedColor IndexedColorMap::toIndexedColor(const LabColor& color, LabColor& er
   float minDeltaE = std::numeric_limits<float>::infinity();
   IndexedColor minIndexColor = 0;
   LabColor minLabColor;
+
   for (const auto& [indexedColor, refColor] : indexToLab)
   {
-    float dE = refColor.deltaE(color);
+    float dE = monochrome_? std::abs(refColor.L-color.L) : refColor.deltaE(color);
     if (dE < minDeltaE)
     {
       minDeltaE = dE;
@@ -152,7 +185,8 @@ IndexedColor IndexedColorMap::toIndexedColor(const LabColor& color, LabColor& er
       minLabColor = refColor;
     }
   }
-  error = color - minLabColor;
+
+  error = monochrome_ ? LabColor{color.L-minLabColor.L,0,0} : (color - minLabColor);
   return minIndexColor;
 }
 

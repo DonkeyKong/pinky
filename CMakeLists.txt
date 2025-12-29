@@ -55,6 +55,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   src
   deps/pi-pico-cpp/include
   deps/Arducam_Mega/src
+  deps/magic_enum/include
 )
 
 # Generate all PIO headers
