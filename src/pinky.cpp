@@ -131,14 +131,14 @@ int main()
   float testValue = 0.9f;
   bool testRings = false;
   bool ledStateDirty = true;
-  float ditherAccuracy = 0.95f;
+  float ditherAccuracy = 0.7f;
 
   if (inky)
   {
     parser.addProperty("t1_s", testSaturation, false, "Test Pattern 1, Saturation");
     parser.addProperty("t1_v", testValue, false, "Test Pattern 1, Value");
     parser.addProperty("t1_rings", testRings, false, "Test Pattern 1, Rings enabled");
-    parser.addProperty("dither_accuracy", ditherAccuracy, false, "Lab Dither error propigation rate. (default 0.95)");
+    parser.addProperty("dither_accuracy", ditherAccuracy, false, "Lab Dither error propigation rate. (default 0.7)");
 
     parser.addCommand("eeprom", "", "Print out eeprom data read from the display",[&]()
     {

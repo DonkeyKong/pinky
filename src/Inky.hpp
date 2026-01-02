@@ -494,7 +494,8 @@ public:
     colorMap_ = std::make_shared<IndexedColorMap>(ColorMapArgList{
         // Emperically measured colors
         {ColorName::Black, 0, {36, 39, 63}},
-        {ColorName::White, 1, {195, 185, 184}},
+        //{ColorName::White, 1, {195, 185, 184}},
+        {ColorName::White, 1, {240, 230, 230}},
         {ColorName::Green, 2, {56, 76, 46}},
         {ColorName::Blue, 3, {59, 54, 86}},
         {ColorName::Red, 4, {133, 55, 46}},
