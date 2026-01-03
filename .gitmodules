@@ -7,3 +7,6 @@
 [submodule "deps/magic_enum"]
 	path = deps/magic_enum
 	url = https://github.com/Neargye/magic_enum.git
+[submodule "deps/picojpeg"]
+	path = deps/picojpeg
+	url = https://github.com/richgel999/picojpeg.git

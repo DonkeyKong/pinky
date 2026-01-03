@@ -41,13 +41,20 @@ set(CMAKE_CXX_STANDARD 17)
 # Initialize the SDK
 pico_sdk_init()
 
+# Import picojpeg
+add_library(picojpeg
+  deps/picojpeg/picojpeg.c
+)
+target_include_directories(picojpeg PUBLIC
+  deps/picojpeg
+)
+
 # Create executable
 add_executable(${PROJECT_NAME}
   src/pinky.cpp
   src/cam_spi_master.c
   deps/Arducam_Mega/src/Arducam_Mega.cpp
-  deps/Arducam_Mega/src/Arducam/ArducamCamera.c
-  
+  deps/Arducam_Mega/src/Arducam/ArducamCamera.c 
 )
 
 # Add pi-pico-cpp and current dir to include directories
@@ -65,7 +72,7 @@ foreach(pio_file ${pio_files})
 endforeach()
 
 target_compile_definitions(${PROJECT_NAME} PUBLIC "LOGGING_ENABLED")
-target_compile_definitions(${PROJECT_NAME} PUBLIC "DEBUG_SPI")
+#target_compile_definitions(${PROJECT_NAME} PUBLIC "DEBUG_SPI")
 #target_compile_definitions(${PROJECT_NAME} PUBLIC "ENABLE_PICO_MULTICORE")
 
 target_link_libraries(${PROJECT_NAME}
@@ -80,6 +87,7 @@ target_link_libraries(${PROJECT_NAME}
         # pico_sync 
         hardware_pio
         # pico_cyw43_arch_lwip_poll
+        picojpeg
 )
 
 # Configure USB for stdio (disables uart)
