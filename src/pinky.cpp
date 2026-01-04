@@ -216,7 +216,7 @@ bool decodeImageYUV(int width, int height, Arducam_Mega& cam, RGBImageView& buff
         {
           buffer.setPixel(x, y-1, YUVColor {
             line1[x*2],
-            (uint8_t)std::clamp((int)line0[x*2+1] + (int)line2[x*2+1] / 2, 0, 255),
+            (uint8_t)std::clamp(((int)line0[x*2+1] + (int)line2[x*2+1]) / 2, 0, 255),
             line1[x*2+1]
           }.toRGB());
         }
@@ -228,7 +228,7 @@ bool decodeImageYUV(int width, int height, Arducam_Mega& cam, RGBImageView& buff
           buffer.setPixel(x, y-1, YUVColor {
             line1[x*2],
             line1[x*2+1],
-            (uint8_t)std::clamp((int)line0[x*2+1] + (int)line2[x*2+1] / 2, 0, 255),
+            (uint8_t)std::clamp(((int)line0[x*2+1] + (int)line2[x*2+1]) / 2, 0, 255),
           }.toRGB());
         }
       }
@@ -502,7 +502,7 @@ int main()
   bool ledStateDirty = true;
   float ditherAccuracy = 0.75f;
   int camMode = (int)CAM_IMAGE_MODE_VGA;
-  int camFormat = (int)CAM_IMAGE_PIX_FMT_JPG;
+  int camFormat = (int)CAM_IMAGE_PIX_FMT_YUV;
   snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
 
   if (inky)
