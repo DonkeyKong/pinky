@@ -165,6 +165,120 @@ bool decodeImageRGB565(int width, int height, Arducam_Mega& cam, RGBImageView& b
   return true;
 }
 
+
+bool decodeImageYUV(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
+{
+  if (cam.getReceivedLength() != (width * height * 2))
+  {
+    std::cout << "Bad image size! Got " << cam.getReceivedLength() << " bytes, expected " << (width * height * 2) << " bytes" << std::endl;
+    return false;
+  }
+
+  int widthBytes = width * 2;
+  int writeWidth = std::min(width, buffer.width);
+  uint8_t yuv16a[widthBytes];
+  uint8_t yuv16b[widthBytes];
+  uint8_t yuv16c[widthBytes];
+  uint8_t* line2 = yuv16c;
+  uint8_t* line1 = yuv16b;
+  uint8_t* line0 = yuv16a;
+  bool uLine = true;
+  
+  for (int y=0; y < height; ++y)
+  {
+    // Collect one line of the image into line0
+    int readX = 0;
+    while (readX < widthBytes)
+    {
+      readX += cam.readBuff(line0 + readX, std::min(255, widthBytes-readX));
+    }
+
+    // If this is the second line, write out line1,
+    // interpolating only with line0
+    if (y == 1 && (y-1) < buffer.height)
+    {
+      for (int x=0; x < writeWidth; ++x)
+      {
+        buffer.setPixel(x, y-1, YUVColor {
+          line1[x*2],
+          line1[x*2+1],
+          line0[x*2+1]
+        }.toRGB());
+      }
+    }
+    // If this is the third or greater line, write out line1
+    // interpolating it with lines 0 and 2
+    else if (y > 1 && (y-1) < buffer.height)
+    {
+      if (uLine)
+      {
+        for (int x=0; x < writeWidth; ++x)
+        {
+          buffer.setPixel(x, y-1, YUVColor {
+            line1[x*2],
+            (uint8_t)std::clamp((int)line0[x*2+1] + (int)line2[x*2+1] / 2, 0, 255),
+            line1[x*2+1]
+          }.toRGB());
+        }
+      }
+      else
+      {
+        for (int x=0; x < writeWidth; ++x)
+        {
+          buffer.setPixel(x, y-1, YUVColor {
+            line1[x*2],
+            line1[x*2+1],
+            (uint8_t)std::clamp((int)line0[x*2+1] + (int)line2[x*2+1] / 2, 0, 255),
+          }.toRGB());
+        }
+      }
+    }
+    
+    // If this was the last line, write out line0,
+    // interpolating only with line1
+    if (y == height-1 && y < buffer.height)
+    {
+      if (uLine)
+      {
+        for (int x=0; x < writeWidth; ++x)
+        {
+          buffer.setPixel(x, y, YUVColor {
+            line0[x*2],
+            line0[x*2+1],
+            line1[x*2+1]
+          }.toRGB());
+        }
+      }
+      else
+      {
+        for (int x=0; x < writeWidth; ++x)
+        {
+          buffer.setPixel(x, y, YUVColor {
+            line0[x*2],
+            line1[x*2+1],
+            line0[x*2+1]
+          }.toRGB());
+        }
+      }
+    }
+
+    // Give a progress update
+    if (progressCb)
+    {
+      progressCb((float)y / (float) buffer.height);
+    }
+
+    // mark the next line as a V line
+    uLine = !uLine;
+
+    // shuffle the line buffers
+    std::swap(line0, line2);
+    std::swap(line1, line2);
+  }
+
+  return true;
+}
+
 void copyMcuDataGreyscale(unsigned char* r, unsigned char* /*g*/, unsigned char* /*b*/, RGBColor* dest, int stride)
 {
   for (int j=0; j < 8; ++j)
@@ -395,7 +509,7 @@ int main()
   {
     parser.addProperty("dither", ditherAccuracy, false, "0.0 - 1.0 (default 0.75)");
 
-    parser.addCommand("format", "[enum]", "JPG=1, RGB565=2", [&](int format){
+    parser.addCommand("format", "[enum]", "JPG=1, RGB565=2, YUV=3", [&](int format){
       camFormat = format;
       snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
     });
@@ -504,6 +618,10 @@ int main()
       if (format == CAM_IMAGE_PIX_FMT_RGB565)
       {
         decodeOk = decodeImageRGB565(width, height, cam, buffer, progressCb);
+      }
+      else if (format == CAM_IMAGE_PIX_FMT_YUV)
+      {
+        decodeOk = decodeImageYUV(width, height, cam, buffer, progressCb);
       }
       else if (format == CAM_IMAGE_PIX_FMT_JPG)
       {
