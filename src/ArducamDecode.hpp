@@ -74,29 +74,53 @@ bool decodeImageYUYV(int width, int height, Arducam_Mega& cam, RGBImageView& buf
       readX += cam.readBuff(yuyv + readX, std::min(255, widthBytes-readX));
     }
 
-    if (y < buffer.height)
+    if (y < buffer.height && writeWidth > 1)
     {
-      for (int x=0; x < writeWidth; ++x)
+      // Write the first pixel without interpolation
+      buffer.setPixel(0, y, YUVColor {
+              yuyv[0],
+              yuyv[1],
+              yuyv[3],
+            }.toRGB());
+      
+      // Write pixels 1 to (N-1), interpolating the U and V values horizontally
+      for (int x=1; x < writeWidth-1; ++x)
       {
-        if (x*2+3 < widthBytes)
+        if (x%2==0)
         {
-          if (x%2==0)
-          {
-            buffer.setPixel(x, y, YUVColor {
-              yuyv[x*2],
-              yuyv[x*2+1],
-              yuyv[x*2+3],
-            }.toRGB());
-          }
-          else
-          {
-            buffer.setPixel(x, y, YUVColor {
-              yuyv[x*2],
-              yuyv[x*2+3],
-              yuyv[x*2+1],
-            }.toRGB());
-          }
+          buffer.setPixel(x, y, YUVColor {
+            yuyv[x*2],
+            yuyv[x*2+1],
+            (uint8_t)std::clamp(((int)yuyv[x*2-1] + (int)yuyv[x*2+3]) / 2, 0, 255),
+          }.toRGB());
         }
+        else
+        {
+          buffer.setPixel(x, y, YUVColor {
+            yuyv[x*2],
+            (uint8_t)std::clamp(((int)yuyv[x*2-1] + (int)yuyv[x*2+3]) / 2, 0, 255),
+            yuyv[x*2+1],
+          }.toRGB());
+        }
+      }
+
+      // Write the last pixel without interpolation
+      int lastX = writeWidth-1;
+      if (lastX%2==0)
+      {
+        buffer.setPixel(lastX, y, YUVColor {
+              yuyv[lastX*2],
+              yuyv[lastX*2+1],
+              yuyv[lastX*2-1],
+          }.toRGB());
+      }
+      else
+      {
+        buffer.setPixel(lastX, y, YUVColor {
+              yuyv[lastX*2],
+              yuyv[lastX*2-1],
+              yuyv[lastX*2+1],
+          }.toRGB());
       }
     }
 
