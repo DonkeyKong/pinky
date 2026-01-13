@@ -15,6 +15,16 @@
 using ProgressUpdateCallback = std::function<void(float)>;
 using McuCopyFunc = void(*)(unsigned char* r, unsigned char* g, unsigned char* b, RGBColor* dest, int stride);
 
+inline uint8_t blendUint8(uint8_t a, uint8_t b)
+{
+  return (uint8_t)std::clamp(((int)a + (int)b) / 2, 0, 255);
+}
+
+inline uint8_t blendUint8(uint8_t a, uint8_t b, uint8_t c, uint8_t d)
+{
+  return (uint8_t)std::clamp(((int)a + (int)b + (int)c + (int)d) / 4, 0, 255);
+}
+
 bool decodeImageRGB565(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
 {
   if (cam.getReceivedLength() != (width * height * 2))
@@ -91,14 +101,14 @@ bool decodeImageYUYV(int width, int height, Arducam_Mega& cam, RGBImageView& buf
           buffer.setPixel(x, y, YUVColor {
             yuyv[x*2],
             yuyv[x*2+1],
-            (uint8_t)std::clamp(((int)yuyv[x*2-1] + (int)yuyv[x*2+3]) / 2, 0, 255),
+            blendUint8(yuyv[x*2-1], yuyv[x*2+3])
           }.toRGB());
         }
         else
         {
           buffer.setPixel(x, y, YUVColor {
             yuyv[x*2],
-            (uint8_t)std::clamp(((int)yuyv[x*2-1] + (int)yuyv[x*2+3]) / 2, 0, 255),
+            blendUint8(yuyv[x*2-1], yuyv[x*2+3]),
             yuyv[x*2+1],
           }.toRGB());
         }
@@ -121,6 +131,59 @@ bool decodeImageYUYV(int width, int height, Arducam_Mega& cam, RGBImageView& buf
               yuyv[lastX*2-1],
               yuyv[lastX*2+1],
           }.toRGB());
+      }
+    }
+
+    // Give a progress update
+    if (progressCb)
+    {
+      progressCb((float)y / (float) buffer.height);
+    }
+  }
+
+  return true;
+}
+
+bool decodeImageYUYVHalf(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
+{
+  if (cam.getReceivedLength() != (width * height * 2))
+  {
+    std::cout << "Bad image size! Got " << cam.getReceivedLength() << " bytes, expected " << (width * height * 2) << " bytes" << std::endl;
+    return false;
+  }
+
+  if (width %2 !=0 || height % 2 != 0)
+  {
+    std::cout << "Image dims must be even." << std::endl;
+    return false;
+  }
+
+  int blitWidth = std::min(width / 2, buffer.width);
+  int blitHeight = std::min(height / 2, buffer.height);
+  int strideBytes = width * 2;
+  int bytesToRead = strideBytes * 2;
+  uint8_t yuyv[bytesToRead];
+  
+  for (int y=0; y < height; y+=2)
+  {
+    // Collect 2 lines of the image
+    int bytesRead = 0;
+    while (bytesRead < bytesToRead)
+    {
+      bytesRead += cam.readBuff(yuyv + bytesRead, std::min(255, bytesToRead-bytesRead));
+    }
+
+    int blitY = y / 2;
+    if (blitY < blitHeight)
+    {
+      for (int blitX = 0; blitX < blitWidth; ++blitX)
+      {
+        int i = blitX * 4;
+        buffer.setPixel(blitX, blitY, YUVColor {
+              blendUint8(yuyv[i], yuyv[i + 2], yuyv[i + strideBytes], yuyv[i + strideBytes + 2]),
+              blendUint8(yuyv[i + 1], yuyv[i + strideBytes + 1]),
+              blendUint8(yuyv[i + 3], yuyv[i + strideBytes + 3])
+            }.toRGB());
       }
     }
 
@@ -295,7 +358,7 @@ void copyMcuDataH2V2(unsigned char* r, unsigned char* g, unsigned char* b, RGBCo
 
 bool decodeImageJPG(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
 {
-  DEBUG_LOG("Snapped JPG formatted iamge with size " << cam.getReceivedLength() << " bytes");
+  DEBUG_LOG("Snapped JPG formatted image with size " << cam.getReceivedLength() << " bytes");
   pjpeg_image_info_t info;
   pjpeg_need_bytes_callback_t getCamBytes = [](unsigned char* pBuf, unsigned char buf_size, unsigned char *pBytes_actually_read, void* camPtr)
   {

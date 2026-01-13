@@ -20,6 +20,15 @@
 #include <Arducam_Mega.h>
 #include <magic_enum/magic_enum.hpp>
 
+// Resolutions supported by the Arducam Mega
+// 320×240    CAM_IMAGE_MODE_QVGA
+// 640×480    CAM_IMAGE_MODE_VGA
+// 1280×720   CAM_IMAGE_MODE_HD
+// 1600×1200  CAM_IMAGE_MODE_UXGA
+// 1920×1080  CAM_IMAGE_MODE_FHD
+// 2048×1536  CAM_IMAGE_MODE_QXGA (3MP only)
+// 2592×1944  CAM_IMAGE_MODE_WQXGA2 (5MP only)
+
 void imageSizeFromArducamMode(CAM_IMAGE_MODE mode, int& width, int& height)
 {
   switch(mode)
@@ -106,7 +115,8 @@ void flushCamera(Arducam_Mega& cam)
 
 void snapAndFlushCamera(Arducam_Mega& cam, CAM_IMAGE_MODE mode, CAM_IMAGE_PIX_FMT format)
 {
-  cam.takePicture(mode, format);
+  auto status = cam.takePicture(mode, format);
+  DEBUG_LOG_IF(status != CamStatus::CAM_ERR_SUCCESS, "arducam takePicture returned error: " << (int)status);
   flushCamera(cam);
 }
 
@@ -118,20 +128,6 @@ int main()
   // Wait 1 second for remote terminals to connect
   // before doing anything.
   sleep_ms(1000);
-
-  // // Init the settings object
-  // FlashStorage<Settings> settingsMgr;
-  // Settings& settings = settingsMgr.data;
-
-  // // Read the current settings
-  // std::cout << "Loading settings..." << std::endl;
-  // if (!settingsMgr.readFromFlash())
-  // {
-  //   std::cout << "No valid settings found, loading defaults..." << std::endl;
-  //   settings.wifiPassword[0] = '\0';
-  //   settings.wifiSsid[0] = '\0';
-  // }
-  // std::cout << "Load complete!" << std::endl;
 
   GPIOButton shutterButton(9, true);
   shutterButton.holdActivationRepeatMs(-1); // Don't send more than one held event ever
@@ -167,14 +163,19 @@ int main()
   };
 
   Arducam_Mega cam(CAM_CSn_PIN);
-  cam.reset();
   cam.begin();
+  cam.reset();
   cam.setAutoExposure(0);
   cam.setAutoISOSensitive(0);
   cam.setAutoWhiteBalance(0);
-  cam.setImageQuality(IMAGE_QUALITY::HIGH_QUALITY);
+  bool ledStateDirty = true;
+  float ditherAccuracy = 0.95f;
+  bool yuvDownsample = true;
+  int camMode = (int)CAM_IMAGE_MODE_UXGA;
+  int camFormat = (int)CAM_IMAGE_PIX_FMT_YUV;
+  snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
 
-  std::unique_ptr<Inky> inky = Inky::Create();
+  std::unique_ptr<Inky> inky = InkyCreate();
   std::shared_ptr<IndexedColorMap> colorMap;
 
   CommandParser parser;
@@ -200,15 +201,11 @@ int main()
       watchdog_reboot(0,0,50);
   });
 
-  bool ledStateDirty = true;
-  float ditherAccuracy = 0.75f;
-  int camMode = (int)CAM_IMAGE_MODE_VGA;
-  int camFormat = (int)CAM_IMAGE_PIX_FMT_YUV;
-  snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
-
   if (inky)
   {
     parser.addProperty("dither", ditherAccuracy, false, "0.0 - 1.0 (default 0.75)");
+
+    parser.addProperty("yuvDownsample", yuvDownsample, false, "Cut YUV image res in half");
 
     parser.addCommand("format", "[enum]", "JPG=1, RGB565=2, YUV=3", [&](int format){
       camFormat = format;
@@ -263,7 +260,13 @@ int main()
 
     parser.addCommand("eeprom", "", "Print out eeprom data read from the display",[&]()
     {
-      inky->eeprom().print();
+      std::cout << "Display EEPROM:" << std::endl;
+      std::cout << "    Width: " << inky->eeprom().width << std::endl;
+      std::cout << "    Height: " << inky->eeprom().height << std::endl;
+      std::cout << "    Color Capability: " << (int)inky->eeprom().colorCapability << std::endl;
+      std::cout << "    PCB Variant: " << (int)inky->eeprom().pcbVariant << std::endl;
+      std::cout << "    Display Variant: " << (int)inky->eeprom().displayVariant << std::endl;
+      std::cout << "    Write Time: " << inky->eeprom().writeTime << std::endl;
     });
 
     parser.addCommand("effect", "[val]", "", [&](std::string name) {
@@ -299,7 +302,10 @@ int main()
       DEBUG_LOG("Taking photo...");
       showProgressOnLeds(1.0f, {255,0,0});
 
-      cam.takePicture(mode, format);
+      auto status = cam.takePicture(mode, format);
+      DEBUG_LOG_IF(status != CamStatus::CAM_ERR_SUCCESS, "arducam takePicture returned error: " << (int)status);
+      DEBUG_LOG("Fetching photo...");
+
       showProgressOnLeds(1.0f, {0,255,0});
       ProgressUpdateCallback progressCb = [&](float progress)
       {
@@ -320,9 +326,13 @@ int main()
       {
         decodeOk = decodeImageRGB565(width, height, cam, buffer, progressCb);
       }
-      else if (format == CAM_IMAGE_PIX_FMT_YUV)
+      else if (format == CAM_IMAGE_PIX_FMT_YUV && !yuvDownsample)
       {
         decodeOk = decodeImageYUYV(width, height, cam, buffer, progressCb);
+      }
+      else if (format == CAM_IMAGE_PIX_FMT_YUV && yuvDownsample)
+      {
+        decodeOk = decodeImageYUYVHalf(width, height, cam, buffer, progressCb);
       }
       else if (format == CAM_IMAGE_PIX_FMT_JPG)
       {
@@ -341,7 +351,7 @@ int main()
       return decodeOk;
     });
 
-    parser.addCommand("test", "pattern", "Show a color test pattern",[&]()
+    parser.addCommand("bars", "", "Show a color test pattern",[&]()
     {
       // Color bar pattern, written directly in indexed colors
       const auto& indexedColors = inky->getColorMap()->indexedColors();
@@ -352,6 +362,29 @@ int main()
         for (int x = 0; x < bufIndexed.width; ++x)
         {
           bufIndexed.setPixel(x, y, indexedColors[std::clamp(x / colsPerColor, 0, (int)(indexedColors.size()-1))]);
+        }
+      }
+      inky->show();
+    });
+
+    parser.addCommand("gradient", "", "Show a color test pattern",[&]()
+    {
+      // Color bar pattern, written directly in indexed colors
+      LabDitherView buffer(inky->bufferIndexed(), colorMap);
+      buffer.ditherAccuracy = ditherAccuracy;
+
+      for (int y = 0; y < buffer.height; ++y)
+      {
+        for (int x = 0; x < buffer.width; ++x)
+        {
+          RGBColor rowColor = HSVColor{
+            remap(x, 0, buffer.width, 0.0f, 360.0f),
+            remap(y, 0, buffer.height, 0.0f, 1.0f),
+            1.0f
+          }.toRGB();
+
+
+          buffer.setPixel(x, y, rowColor);
         }
       }
       inky->show();
@@ -392,7 +425,7 @@ int main()
 
     if (shutterButton.heldActivate())
     {
-      parser.processCommand("test 0");
+      parser.processCommand("test");
     }
 
   }
