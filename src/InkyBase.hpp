@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ImageView.hpp"
+#include "IndexedColor.hpp"
 #include "InkyConfig.hpp"
 
 #include <cpp/DiscreteIn.hpp>
@@ -8,26 +9,29 @@
 #include <cpp/Logging.hpp>
 #include <cpp/SPIDevice.hpp>
 
+#include <memory>
+
 class Inky
 {
 public:
   virtual ~Inky() = 0;
-
   // Get a buffer to draw to the display using indexed colors
-  virtual std::shared_ptr<IndexedImageView> bufferIndexed() = 0;
-
+  virtual ImageView<IndexedColor>& bufferIndexed() = 0;
   // Get the colormap used to convert RGB to the display's indexed colors
-  virtual std::shared_ptr<IndexedColorMap> getColorMap() const = 0;
+  virtual const IndexedColorMap& colorMap() const = 0;
   // Set the color of the bonder pixels
   virtual void setBorder(IndexedColor color) = 0;
   // Get the display eeprom info fetched from I2C before connection
   virtual const InkyEeprom& eeprom() const = 0;
-  // Set the the buffer to all "clean" pixels
+  // Set all pixels in the buffer to the same color
+  // as the border
   virtual void clear() = 0;
+  // Set the the buffer to all "clean" pixels
+  // (or white if clean is not available)
+  virtual void clean() = 0;
   // Push the buffer contents to the display
   virtual void show() = 0;
 };
-
 
 Inky::~Inky() {}
 
@@ -72,9 +76,9 @@ protected:
     return eeprom_;
   }
 
-  virtual std::shared_ptr<IndexedColorMap> getColorMap() const override
+  virtual const IndexedColorMap& colorMap() const override
   {
-    return colorMap_;
+    return *colorMap_;
   }
 
   template <typename C>

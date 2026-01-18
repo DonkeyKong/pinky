@@ -1,7 +1,8 @@
 #include "Settings.hpp"
 #include "Inky.hpp"
+#include "ImageEffect.hpp"
 #include "ColorMapEffect.hpp"
-#include "ArducamDecode.hpp"
+#include "ArducamUtil.hpp"
 
 #include <cpp/Button.hpp>
 #include <cpp/LedStripWs2812b.hpp>
@@ -20,104 +21,11 @@
 #include <Arducam_Mega.h>
 #include <magic_enum/magic_enum.hpp>
 
-// Resolutions supported by the Arducam Mega
-// 320×240    CAM_IMAGE_MODE_QVGA
-// 640×480    CAM_IMAGE_MODE_VGA
-// 1280×720   CAM_IMAGE_MODE_HD
-// 1600×1200  CAM_IMAGE_MODE_UXGA
-// 1920×1080  CAM_IMAGE_MODE_FHD
-// 2048×1536  CAM_IMAGE_MODE_QXGA (3MP only)
-// 2592×1944  CAM_IMAGE_MODE_WQXGA2 (5MP only)
-
-void imageSizeFromArducamMode(CAM_IMAGE_MODE mode, int& width, int& height)
-{
-  switch(mode)
-  {
-    case CAM_IMAGE_MODE_96X96    :
-      width = 96;
-      height = 96;
-      return;
-    case CAM_IMAGE_MODE_128X128  :
-      width = 128;
-      height = 128;
-      return;
-    case CAM_IMAGE_MODE_QQVGA    :
-      width = 160;
-      height = 120;
-      return;
-    case CAM_IMAGE_MODE_QVGA     :
-      width = 320;
-      height = 240;
-      return;
-    case CAM_IMAGE_MODE_320X320  :
-      width = 320;
-      height = 320;
-      return;
-    case CAM_IMAGE_MODE_VGA      :
-      width = 640;
-      height = 480;
-      return;
-    case CAM_IMAGE_MODE_SVGA     :
-      width = 800;
-      height = 600;
-      return;
-    case CAM_IMAGE_MODE_1024X768 :
-      width = 1024;
-      height = 768;
-      return;
-    case CAM_IMAGE_MODE_HD       :
-      width = 1280;
-      height = 720;
-      return;
-    case CAM_IMAGE_MODE_1280X1024:
-      width = 1280;
-      height = 1024;
-      return;
-    case CAM_IMAGE_MODE_UXGA     :
-      width = 1600;
-      height = 1200;
-      return;
-    case CAM_IMAGE_MODE_FHD      :
-      width = 1920;
-      height = 1080;
-      return;
-    case CAM_IMAGE_MODE_QXGA     :
-      width = 2048;
-      height = 1536;
-      return;
-    case CAM_IMAGE_MODE_WQXGA2   :
-      width = 2592;
-      height = 1944;
-      return;
-    default:
-      width = 0;
-      height = 0;
-      return;
-  }
-}
 
 void rebootIntoProgMode()
 {
   //multicore_reset_core1();
   reset_usb_boot(0,0);
-}
-
-void flushCamera(Arducam_Mega& cam)
-{
-  uint8_t buf[255];
-  int bytesFlushed = 0;
-  while (cam.getReceivedLength() > 0)
-  {
-    bytesFlushed += cam.readBuff(buf, 255);
-  }
-  DEBUG_LOG_IF(bytesFlushed > 0, "Flushed " << bytesFlushed << " bytes from camera send buffer.");
-}
-
-void snapAndFlushCamera(Arducam_Mega& cam, CAM_IMAGE_MODE mode, CAM_IMAGE_PIX_FMT format)
-{
-  auto status = cam.takePicture(mode, format);
-  DEBUG_LOG_IF(status != CamStatus::CAM_ERR_SUCCESS, "arducam takePicture returned error: " << (int)status);
-  flushCamera(cam);
 }
 
 int main()
@@ -131,6 +39,9 @@ int main()
 
   GPIOButton shutterButton(9, true);
   shutterButton.holdActivationRepeatMs(-1); // Don't send more than one held event ever
+
+  std::unique_ptr<Inky> inky = InkyCreate();
+  std::shared_ptr<IndexedColorMap> specialColorMap;
 
   LedStripWs2812b leds(16);
   LEDBuffer buf(6);
@@ -171,12 +82,9 @@ int main()
   bool ledStateDirty = true;
   float ditherAccuracy = 0.95f;
   bool yuvDownsample = true;
-  int camMode = (int)CAM_IMAGE_MODE_UXGA;
+  const ArducamResolution* camRes = pickCameraResolution(inky->eeprom().width, inky->eeprom().height);
   int camFormat = (int)CAM_IMAGE_PIX_FMT_YUV;
-  snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
-
-  std::unique_ptr<Inky> inky = InkyCreate();
-  std::shared_ptr<IndexedColorMap> colorMap;
+  snapAndFlushCamera(cam, camRes, (CAM_IMAGE_PIX_FMT)camFormat);
 
   CommandParser parser;
 
@@ -209,22 +117,22 @@ int main()
 
     parser.addCommand("format", "[enum]", "JPG=1, RGB565=2, YUV=3", [&](int format){
       camFormat = format;
-      snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
+      snapAndFlushCamera(cam, camRes, (CAM_IMAGE_PIX_FMT)camFormat);
     });
 
     parser.addCommand("mode", "[enum]", "4=320x320, 5=640x480, 12=2048x1536", [&](int mode){
-      camMode = mode;
-      snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
+      camRes = pickCameraResolution((CAM_IMAGE_MODE)mode);
+      snapAndFlushCamera(cam, camRes, (CAM_IMAGE_PIX_FMT)camFormat);
     });
 
     parser.addCommand("quality", "[compression]", "0=high, 1=med, 2=low", [&](int quality){
       cam.setImageQuality((IMAGE_QUALITY)quality);
-      snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
+      snapAndFlushCamera(cam, camRes, (CAM_IMAGE_PIX_FMT)camFormat);
     });
 
     parser.addCommand("whitebalance", "[enum]", "Auto white balance mode, 0=default", [&](int wb){
       cam.setAutoWhiteBalanceMode((CAM_WHITE_BALANCE)wb);
-      snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
+      snapAndFlushCamera(cam, camRes, (CAM_IMAGE_PIX_FMT)camFormat);
     });
 
     parser.addCommand("saturation", "[level]", "-3 to +3", [&](int value){
@@ -254,7 +162,7 @@ int main()
         default:
           return false;
       }
-      snapAndFlushCamera(cam, (CAM_IMAGE_MODE)camMode, (CAM_IMAGE_PIX_FMT)camFormat);
+      snapAndFlushCamera(cam, camRes, (CAM_IMAGE_PIX_FMT)camFormat);
       return true;
     });
 
@@ -272,7 +180,7 @@ int main()
     parser.addCommand("effect", "[val]", "", [&](std::string name) {
 
       std::optional<ColorMapEffect> effect;
-      colorMap.reset();
+      specialColorMap.reset();
 
       if (!effect)
       {
@@ -286,10 +194,10 @@ int main()
 
       if (effect)
       {
-        colorMap = getColorMapWithEffect(*inky->getColorMap(), effect.value());
+        specialColorMap = getColorMapWithEffect(inky->colorMap(), effect.value());
       }
       
-      if (colorMap)
+      if (specialColorMap)
         std::cout << "Set custom effect" << std::endl;
       else
         std::cout << "Cleared custom effect" << std::endl;
@@ -297,14 +205,16 @@ int main()
 
     parser.addCommand("snap", "", "Snap a photo and display it.", [&]()
     {
-      CAM_IMAGE_MODE mode = (CAM_IMAGE_MODE)camMode;
       CAM_IMAGE_PIX_FMT format = (CAM_IMAGE_PIX_FMT)camFormat;
       DEBUG_LOG("Taking photo...");
       showProgressOnLeds(1.0f, {255,0,0});
 
-      auto status = cam.takePicture(mode, format);
+      auto status = cam.takePicture(camRes->mode, format);
       DEBUG_LOG_IF(status != CamStatus::CAM_ERR_SUCCESS, "arducam takePicture returned error: " << (int)status);
       DEBUG_LOG("Fetching photo...");
+      
+      // Clear the display
+      inky->clear();
 
       showProgressOnLeds(1.0f, {0,255,0});
       ProgressUpdateCallback progressCb = [&](float progress)
@@ -315,28 +225,28 @@ int main()
         }
       };
 
-      LabDitherView buffer(inky->bufferIndexed(), colorMap);
+      LabDitherView buffer(inky->bufferIndexed(), specialColorMap ? *specialColorMap : inky->colorMap());
       buffer.ditherAccuracy = ditherAccuracy;
+      AlignCenterView centeredBuffer(buffer, camRes->width, camRes->height);
 
       bool decodeOk = false;
       auto startTime = to_ms_since_boot(get_absolute_time());
-      int width, height;
-      imageSizeFromArducamMode(mode, width, height);
       if (format == CAM_IMAGE_PIX_FMT_RGB565)
       {
-        decodeOk = decodeImageRGB565(width, height, cam, buffer, progressCb);
+        decodeOk = decodeImageRGB565(camRes->width, camRes->height, cam, centeredBuffer, progressCb);
       }
       else if (format == CAM_IMAGE_PIX_FMT_YUV && !yuvDownsample)
       {
-        decodeOk = decodeImageYUYV(width, height, cam, buffer, progressCb);
+        decodeOk = decodeImageYUYV(camRes->width, camRes->height, cam, centeredBuffer, progressCb);
       }
       else if (format == CAM_IMAGE_PIX_FMT_YUV && yuvDownsample)
       {
-        decodeOk = decodeImageYUYVHalf(width, height, cam, buffer, progressCb);
+        AlignCenterView centeredBuffer(buffer, camRes->width/2, camRes->height/2);
+        decodeOk = decodeImageYUYVHalf(camRes->width, camRes->height, cam, centeredBuffer, progressCb);
       }
       else if (format == CAM_IMAGE_PIX_FMT_JPG)
       {
-        decodeOk = decodeImageJPG(width, height, cam, buffer, progressCb);
+        decodeOk = decodeImageJPG(camRes->width, camRes->height, cam, centeredBuffer, progressCb);
       }
 
       flushCamera(cam);
@@ -354,8 +264,8 @@ int main()
     parser.addCommand("bars", "", "Show a color test pattern",[&]()
     {
       // Color bar pattern, written directly in indexed colors
-      const auto& indexedColors = inky->getColorMap()->indexedColors();
-      auto& bufIndexed = *inky->bufferIndexed().get();
+      const auto& indexedColors = inky->colorMap().indexedColors();
+      auto& bufIndexed = inky->bufferIndexed();
       int colsPerColor = bufIndexed.width / indexedColors.size();
       for (int y = 0; y < bufIndexed.height; ++y)
       {
@@ -370,7 +280,7 @@ int main()
     parser.addCommand("gradient", "", "Show a color test pattern",[&]()
     {
       // Color bar pattern, written directly in indexed colors
-      LabDitherView buffer(inky->bufferIndexed(), colorMap);
+      LabDitherView buffer(inky->bufferIndexed(), specialColorMap ? *specialColorMap : inky->colorMap());
       buffer.ditherAccuracy = ditherAccuracy;
 
       for (int y = 0; y < buffer.height; ++y)

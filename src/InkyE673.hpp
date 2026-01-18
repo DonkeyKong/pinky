@@ -114,7 +114,7 @@ public:
     });
     border_ = colorMap_->toIndexedColor(ColorName::Black);
 
-    buf_ = std::make_shared<Packed4BitIndexedImage>(eeprom_.width, eeprom_.height, colorMap_);
+    buf_ = std::make_shared<Packed4BitIndexedImage>(eeprom_.width, eeprom_.height);
 
     // Setup the GPIO pins
     dc_.set(false);
@@ -123,9 +123,9 @@ public:
     // Call reset method here? Reference implementation does.
   }
 
-  virtual std::shared_ptr<IndexedImageView> bufferIndexed() override
+  virtual ImageView<IndexedColor>& bufferIndexed() override
   {
-    return buf_;
+    return *buf_;
   }
 
   virtual void show() override
@@ -148,8 +148,20 @@ public:
 
   virtual void clear() override
   {
+    auto& bufIndexed = *buf_;
+    for (int y=0; y < eeprom_.height; ++y)
+    {
+      for (int x=0; x < eeprom_.width; ++x)
+      {
+        bufIndexed.setPixel(x,y, border_);
+      }
+    }
+  }
+
+  virtual void clean() override
+  {
     auto cleanColor = colorMap_->toIndexedColor(ColorName::Clean);
-    auto& bufIndexed = *buf_.get();
+    auto& bufIndexed = *buf_;
     for (int y=0; y < eeprom_.height; ++y)
     {
       for (int x=0; x < eeprom_.width; ++x)

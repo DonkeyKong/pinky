@@ -1,6 +1,8 @@
 #pragma once
 
 #include "InkyBase.hpp"
+#include "Image.hpp"
+#include "ImageConvert.hpp"
 
 class InkySSD1683 final : public InkyBase
 {
@@ -75,8 +77,6 @@ class InkySSD1683 final : public InkyBase
   }
 
   std::shared_ptr<PackedTwoPlaneBinaryImage> buf_;
-  std::shared_ptr<IndexedToPackedTwoPlaneBinaryImageView> bufIndexed_;
-
 
 public:
   InkySSD1683(const InkyConfig& config, InkyEeprom info) : InkyBase(config, info, SPIDeviceSpeedHz, SPITransferSize, SendCommandDelay)
@@ -118,26 +118,25 @@ public:
     dc_.set(false);
     reset_.set(true);
 
-    buf_ = std::make_shared<PackedTwoPlaneBinaryImage>(eeprom_.width, eeprom_.height);
-
     IndexedColor color = colorMap_->toIndexedColor(ColorName::Red);
     if (eeprom_.colorCapability == ColorCapability::BlackWhiteYellow)
     {
       color = colorMap_->toIndexedColor(ColorName::Yellow);
     }
-    bufIndexed_ = std::make_shared<IndexedToPackedTwoPlaneBinaryImageView>(
-      buf_, 
-      colorMap_, 
+
+    buf_ = std::make_shared<PackedTwoPlaneBinaryImage>(
+      eeprom_.width,
+      eeprom_.height,
       colorMap_->toIndexedColor(ColorName::Black),
       colorMap_->toIndexedColor(ColorName::White), 
-      color, 
+      color,
       color
     );
   }
 
-  virtual std::shared_ptr<IndexedImageView> bufferIndexed() override
+  virtual ImageView<IndexedColor>& bufferIndexed() override
   {
-    return bufIndexed_;
+    return *buf_;
   }
 
   virtual void show() override
@@ -198,13 +197,25 @@ public:
 
   virtual void clear() override
   {
-    auto whiteColor = colorMap_->toIndexedColor(ColorName::White);
-    auto& bufIndexed = *bufIndexed_.get();
+    auto& buf = *buf_;
     for (int y=0; y < eeprom_.height; ++y)
     {
       for (int x=0; x < eeprom_.width; ++x)
       {
-        bufIndexed.setPixel(x,y, whiteColor);
+        buf.setPixel(x,y, border_);
+      }
+    }
+  }
+
+  virtual void clean() override
+  {
+    auto whiteColor = colorMap_->toIndexedColor(ColorName::White);
+    auto& buf = *buf_;
+    for (int y=0; y < eeprom_.height; ++y)
+    {
+      for (int x=0; x < eeprom_.width; ++x)
+      {
+        buf.setPixel(x,y, whiteColor);
       }
     }
   }

@@ -6,10 +6,88 @@
 #include <cpp/Logging.hpp>
 
 #include <Arducam_Mega.h>
+#include <magic_enum/magic_enum.hpp>
 #include <picojpeg.h>
 
 #include <functional>
 #include <iostream>
+
+enum class ArducamSensorFlag : uint8_t
+{
+  SENSOR_2MP = 0b00000001,
+  SENSOR_3MP = 0b00000010,
+  SENSOR_5MP = 0b00000100,
+  SENSOR_ALL = 0b11111111
+};
+
+struct ArducamResolution
+{
+  int width;
+  int height;
+  CAM_IMAGE_MODE mode;
+  ArducamSensorFlag sensor;
+};
+
+constexpr std::array<ArducamResolution, 14> ArducamResolutions 
+{
+  ArducamResolution 
+  {96, 96, CAM_IMAGE_MODE_96X96, ArducamSensorFlag::SENSOR_ALL},
+  {128, 128, CAM_IMAGE_MODE_128X128, ArducamSensorFlag::SENSOR_ALL},
+  {160, 120, CAM_IMAGE_MODE_QQVGA, ArducamSensorFlag::SENSOR_ALL},
+  {320, 240, CAM_IMAGE_MODE_QVGA, ArducamSensorFlag::SENSOR_ALL},
+  {320, 320, CAM_IMAGE_MODE_320X320, ArducamSensorFlag::SENSOR_ALL},
+  {640, 480, CAM_IMAGE_MODE_VGA, ArducamSensorFlag::SENSOR_ALL},
+  {800, 600, CAM_IMAGE_MODE_SVGA, ArducamSensorFlag::SENSOR_ALL},
+  {1024, 768, CAM_IMAGE_MODE_1024X768, ArducamSensorFlag::SENSOR_ALL},
+  {1280, 720, CAM_IMAGE_MODE_HD, ArducamSensorFlag::SENSOR_ALL},
+  {1280, 1024, CAM_IMAGE_MODE_1280X1024, ArducamSensorFlag::SENSOR_ALL},
+  {1600, 1200, CAM_IMAGE_MODE_UXGA, ArducamSensorFlag::SENSOR_ALL},
+  {1920, 1080, CAM_IMAGE_MODE_FHD, ArducamSensorFlag::SENSOR_ALL},
+  {2048, 1536, CAM_IMAGE_MODE_QXGA, ArducamSensorFlag::SENSOR_3MP},
+  {2592, 1944, CAM_IMAGE_MODE_WQXGA2, ArducamSensorFlag::SENSOR_5MP}
+};
+
+// Given the provided width and height, pick a camera mode
+const ArducamResolution* pickCameraResolution(int displayWidth, int displayHeight)
+{
+  return &ArducamResolutions[10];
+}
+
+const ArducamResolution* pickCameraResolution(CAM_IMAGE_MODE mode)
+{
+  for (const ArducamResolution& res : ArducamResolutions)
+  {
+    if (res.mode == mode)
+    {
+      return &res;
+    }
+  }
+  return pickCameraResolution(CAM_IMAGE_MODE_VGA); // use vga by default
+}
+
+void printCameraInfo(Arducam_Mega& cam)
+{
+  auto camStruct = cam.getCameraInstance();
+  std::cout << "Camera ID: " << (int)camStruct->cameraId << std::endl;
+}
+
+void flushCamera(Arducam_Mega& cam)
+{
+  uint8_t buf[255];
+  int bytesFlushed = 0;
+  while (cam.getReceivedLength() > 0)
+  {
+    bytesFlushed += cam.readBuff(buf, 255);
+  }
+  DEBUG_LOG_IF(bytesFlushed > 0, "Flushed " << bytesFlushed << " bytes from camera send buffer.");
+}
+
+void snapAndFlushCamera(Arducam_Mega& cam, const ArducamResolution* camRes, CAM_IMAGE_PIX_FMT format)
+{
+  auto status = cam.takePicture(camRes->mode, format);
+  DEBUG_LOG_IF(status != CamStatus::CAM_ERR_SUCCESS, "arducam takePicture returned error: " << (int)status);
+  flushCamera(cam);
+}
 
 // Update the rest of the app on progress using a float, 0.0f - 1.0f
 using ProgressUpdateCallback = std::function<void(float)>;
@@ -25,7 +103,7 @@ inline uint8_t blendUint8(uint8_t a, uint8_t b, uint8_t c, uint8_t d)
   return (uint8_t)std::clamp(((int)a + (int)b + (int)c + (int)d) / 4, 0, 255);
 }
 
-bool decodeImageRGB565(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
+bool decodeImageRGB565(int width, int height, Arducam_Mega& cam, ImageView<RGBColor>& buffer, ProgressUpdateCallback progressCb = nullptr)
 {
   if (cam.getReceivedLength() != (width * height * 2))
   {
@@ -63,7 +141,7 @@ bool decodeImageRGB565(int width, int height, Arducam_Mega& cam, RGBImageView& b
   return true;
 }
 
-bool decodeImageYUYV(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
+bool decodeImageYUYV(int width, int height, Arducam_Mega& cam, ImageView<RGBColor>& buffer, ProgressUpdateCallback progressCb = nullptr)
 {
   if (cam.getReceivedLength() != (width * height * 2))
   {
@@ -144,7 +222,7 @@ bool decodeImageYUYV(int width, int height, Arducam_Mega& cam, RGBImageView& buf
   return true;
 }
 
-bool decodeImageYUYVHalf(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
+bool decodeImageYUYVHalf(int width, int height, Arducam_Mega& cam, ImageView<RGBColor>& buffer, ProgressUpdateCallback progressCb = nullptr)
 {
   if (cam.getReceivedLength() != (width * height * 2))
   {
@@ -197,7 +275,7 @@ bool decodeImageYUYVHalf(int width, int height, Arducam_Mega& cam, RGBImageView&
   return true;
 }
 
-bool decodeImageYUV(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
+bool decodeImageYUV(int width, int height, Arducam_Mega& cam, ImageView<RGBColor>& buffer, ProgressUpdateCallback progressCb = nullptr)
 {
   if (cam.getReceivedLength() != (width * height * 2))
   {
@@ -356,7 +434,7 @@ void copyMcuDataH2V2(unsigned char* r, unsigned char* g, unsigned char* b, RGBCo
   copyMcuDataH1V1(r+192, g+192, b+192, dest+(8*stride)+8, stride);
 }
 
-bool decodeImageJPG(int width, int height, Arducam_Mega& cam, RGBImageView& buffer, ProgressUpdateCallback progressCb = nullptr)
+bool decodeImageJPG(int width, int height, Arducam_Mega& cam, ImageView<RGBColor>& buffer, ProgressUpdateCallback progressCb = nullptr)
 {
   DEBUG_LOG("Snapped JPG formatted image with size " << cam.getReceivedLength() << " bytes");
   pjpeg_image_info_t info;
